@@ -1,9 +1,6 @@
 # MOReL
 This is an implementation of the MOReL offline reinforcement learning algorithm using Python and Tensorflow. The full paper can be found here: [https://arxiv.org/pdf/2005.05951.pdf](https://arxiv.org/pdf/2005.05951.pdf)
 
-# MOReL
-This is an implementation of the MOReL offline reinforcement learning algorithm using Python and Tensorflow. The full paper can be found here: [https://arxiv.org/pdf/2005.05951.pdf](https://arxiv.org/pdf/2005.05951.pdf)
-
 # To-Do List
 
 ## :x: Dynamic Model Learning 
