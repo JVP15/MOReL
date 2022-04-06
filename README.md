@@ -19,8 +19,8 @@ MOReL uses an Unknown State-Action Detector (USAD) to identify what states are k
 
 The MOReL algorithm was trained and tested using 4 environments: HalfCheetah-v2, Hopper-v2, Walker2D-v2, and ~~Headcrab~~ Ant-v2. 5 datasets were generated for each environment (see section 5 on [page 7](https://arxiv.org/pdf/2005.05951.pdf#page=7) for a breakdown of how they were created). Each dataset contains 1,000,000 timesteps. The paper used a partially trained policy π to generate the dataset. This policy was trained using a model-based natural policy gradeint (NPG) algorithm from [https://sites.google.com/view/mbrl-game](https://sites.google.com/view/mbrl-game)
 
-* :x: Implement the policy training algorithm (this is the same as the task in the Planning section)
-* :x: Train the collection policy (see see section 5 on [page 7](https://arxiv.org/pdf/2005.05951.pdf#page=7) for a breakdown on how the policy was trained)
+* ☑️ Implement the policy training algorithm (doesn't work for HalfCheetah-v2)
+* ☑️ Train the collection policy (see see section 5 on [page 7](https://arxiv.org/pdf/2005.05951.pdf#page=7) for a breakdown on how the policy was trained). Collection policies trained for Hopper-v2, Walker2d-v2, and Ant-v2 using the TRPO implementation in Stable Baselines3 Contrib. Saved policies are stored in 'trained_policies' 
 * :x: Create the datasets (due to time and resource constraints, we may not recreate all of the datasets from the paper)
 
 ## :x: Planning
