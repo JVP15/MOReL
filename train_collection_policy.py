@@ -5,8 +5,8 @@ from sb3_contrib import TRPO
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold
 from stable_baselines3.common.monitor import Monitor
 
-DEFAULT_ENV = 'Ant-v2'
-DEFAULT_TARGET_REWARD = 1000
+DEFAULT_ENV = 'CartPole-v1'
+DEFAULT_TARGET_REWARD = 450
 DEFAULT_POLICY_DIR = './trained_policies'
 DEFAULT_MAX_ITERATIONS = 1000000
 DEFAULT_EVAL_INTERVAL = 1000
