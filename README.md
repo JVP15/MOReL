@@ -3,11 +3,11 @@ This is an implementation of the MOReL offline reinforcement learning algorithm 
 
 # To-Do List
 
-## :x: Dynamic Model Learning 
+## :construction: Dynamic Model Learning 
 MOReL uses a Gaussian dynamics `P(*|s,a) = N(f(s,a), Σ)`. 
 
 * :x: Train the neural network used by `f(s,a)` on the dataset using maximum likelihood estimation
-* :x: Implement `f(s,a)` (see the bottom of [page 6](https://arxiv.org/pdf/2005.05951.pdf#page=6))
+* :construction: Implement `f(s,a)` (see the bottom of [page 6](https://arxiv.org/pdf/2005.05951.pdf#page=6))
 
 ## :x: USAD
 MOReL uses an Unknown State-Action Detector (USAD) to identify what states are known and unknown. This is implemented by creating an ensemble of models trained using different minibatches of the dataset. 
