@@ -8,7 +8,7 @@ from argparse import RawTextHelpFormatter
 from sb3_contrib import TRPO
 
 ACTION_NOISE_OPTIONS = ['pure', 'gauss', 'random']
-DEFAULT_ACTION_NOISE = ['pure', None] # the command line arg expects two values, but the 'pure' option doesn't need any extra values
+DEFAULT_ACTION_NOISE = ['pure', 0.0] # the command line arg expects two values, but the 'pure' option doesn't need any extra values
 DEFAULT_ITERATIONS = 1000000
 DEFAULT_DATASET_DIR = './dataset'
 DEFAULT_VERBOSE = 0
@@ -48,19 +48,20 @@ def collect_dataset(env, model, iterations, dataset_dir, action_noise, action_no
 
     trajectories = []
 
+    observations = []
+    actions = []
+    rewards = []
+
     print('Collecting dataset...')
     obs = env.reset()
     for i in range(iterations):
-        observations = []
-        actions = []
-        rewards = []
+
 
         if action_noise == 'pure':
             action, _state = model.predict(obs, deterministic=True)
         else:
             action = sample_for_noisy_dataset(obs, model, i, iterations, action_noise, action_noise_arg)
 
-        # TODO: add support for action noise. Right now it only supports the pure dataset collection
         obs, reward, done, _info = env.step(action)
 
         observations.append(obs)
@@ -74,9 +75,9 @@ def collect_dataset(env, model, iterations, dataset_dir, action_noise, action_no
             trajectories.append(dict(observations=observations, actions=actions, rewards=rewards))
 
             # empty the observations, actions, and rewards lists for the next episode
-            observations.clear()
-            actions.clear()
-            rewards.clear()
+            observations = []
+            actions = []
+            rewards = []
 
         if i % 1000 == 0:  # TODO: add verbose command line argument and make better progress bar
             print(f'\rCollecting Dataset. Currently on step {i}/{iterations}', end='', flush=True)
@@ -104,7 +105,7 @@ if __name__ == '__main__':
     # unfortunately, I couldn't figure out a clean way to save this description
     parser.add_argument('--action-noise', type=str, default=DEFAULT_ACTION_NOISE, nargs=2, help="""whether the dataset will be generated with action noise or not. There are three options: 'pure', 'gauss', and 'random'.
  pure: (default) the dataset is collected using the specified policy P. Note: this option does not require any additional arguments, but the command line interface will still expect two arguments, so you must specify a value for the second argument.
- gauss: usage --action-noise gauss 
+ gauss: usage --action-noise gauss std
     std 40%% of the dataset is collected using P. 
     40%% of the dataset is collected using zero-mean Gaussian noise with standard deviation std added to the actions sampled from P.'
     20%% of the dataset is collected using a uniform random policy
