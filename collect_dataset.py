@@ -10,6 +10,7 @@ from sb3_contrib import TRPO
 ACTION_NOISE_OPTIONS = ['pure', 'gauss', 'random']
 DEFAULT_ACTION_NOISE = ['pure', 0.0] # the command line arg expects two values, but the 'pure' option doesn't need any extra values
 DEFAULT_ITERATIONS = 1000000
+DEFAULT_HORIZON = 500
 DEFAULT_DATASET_DIR = './dataset'
 DEFAULT_VERBOSE = 0
 
@@ -40,7 +41,7 @@ def sample_for_noisy_dataset(obs, policy, step, max_iterations, action_noise, ac
     return action
 
 
-def collect_dataset(env, model, iterations, dataset_dir, action_noise, action_noise_arg=None):
+def collect_dataset(env, model, iterations, dataset_dir, action_noise, steps_per_trajectory, action_noise_arg=None):
     # the dataset is a collection of trajectories collected over many episodes of the environment
     # we don't collect a set number of trajectories; instead, we just run the agent in the environment for a number of
     #  steps equal to 'iterations' and record the observation, action, and reward at each step, then combine them
@@ -54,6 +55,7 @@ def collect_dataset(env, model, iterations, dataset_dir, action_noise, action_no
 
     print('Collecting dataset...')
     obs = env.reset()
+    step_num = 0
     for i in range(iterations):
 
 
@@ -67,10 +69,11 @@ def collect_dataset(env, model, iterations, dataset_dir, action_noise, action_no
         observations.append(obs)
         actions.append(action)
         rewards.append(reward)
+        step_num += 1
 
         # if the episode is done, reset the environment, collect the observations, actions, and rewards into a
         #  single trajectory, and reset the environment for the next episode
-        if done:
+        if done or step_num == steps_per_trajectory:
             obs = env.reset()
             trajectories.append(dict(observations=observations, actions=actions, rewards=rewards))
 
@@ -78,6 +81,7 @@ def collect_dataset(env, model, iterations, dataset_dir, action_noise, action_no
             observations = []
             actions = []
             rewards = []
+            step_num = 0
 
         if i % 1000 == 0:  # TODO: add verbose command line argument and make better progress bar
             print(f'\rCollecting Dataset. Currently on step {i}/{iterations}', end='', flush=True)
@@ -115,6 +119,7 @@ if __name__ == '__main__':
     20%% of the dataset is collected using a uniform random policy""")
 
     parser.add_argument('--iterations', type=int, default=DEFAULT_ITERATIONS, help=f'number of iterations to save (default: {DEFAULT_ITERATIONS})')
+    parser.add_argument('--horizon', type=int, default=DEFAULT_HORIZON, help=f'number of steps to take when collecting each trajectory (default: {DEFAULT_HORIZON}')
     parser.add_argument('--dir', type=str, default=DEFAULT_DATASET_DIR, help=f'directory to save dataset (default: {DEFAULT_DATASET_DIR})')
     args = parser.parse_args()
 
@@ -125,5 +130,6 @@ if __name__ == '__main__':
     env = gym.make(args.env)
     model = TRPO.load(args.policy, env=env)
 
-    collect_dataset(env=env, model=model, iterations=args.iterations, dataset_dir=args.dir, action_noise=args.action_noise[0], action_noise_arg=float(args.action_noise[1]))
+    collect_dataset(env=env, model=model, iterations=args.iterations, dataset_dir=args.dir, steps_per_trajectory=args.horizon,
+                    action_noise=args.action_noise[0], action_noise_arg=float(args.action_noise[1]))
 
