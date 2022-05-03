@@ -117,7 +117,7 @@ class DynamicsModel(nn.Module):
 
 
     def forward(self, s, a):
-        # equivalent to N(f(s,a), SIGMA) where
+        # equivalent to f(s, a) in the paper
         # f(s,a) = s + s_diff_std * MLP((s - s_mean) / s_std, (a - a_mean) / a_std))
 
         s_normalized = (s - self.state_mean) / self.state_std
@@ -132,7 +132,11 @@ class DynamicsModel(nn.Module):
         mu = torch.relu(mu)
         mu = self.fc3(mu)
 
-        out = s + torch.normal(mu, self.std)
+        return mu
+
+    def sample(self, s, a):
+        # equivalent to N(f(s,a), SIGMA) in the paper where f(s,a) is given by forward
+        out = s + torch.normal(self.forward(s, a), self.std)
         return out
 
     def fit(self, dataset, num_epochs = 300, batch_size = 256, learning_rate = 5e-4):
@@ -179,7 +183,7 @@ class DynamicsModel(nn.Module):
                 optimizer.zero_grad()
 
                 # get the next state predictions
-                next_states = self.forward(s_batch, a_batch)
+                next_states = self.sample(s_batch, a_batch)
 
                 # compute the loss
                 loss = loss_fn(next_states, s_prime_batch)
