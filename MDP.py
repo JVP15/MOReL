@@ -3,14 +3,36 @@ import torch.nn as nn
 import numpy as np
 import pickle
 
+def ant_reward(s,a):
+    # mimics reward function for the ant environment from:
+    # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L241
+    # for some reason, it isn't the exact same reward, but it is close enough, so we'll use it
+    healthy_reward = 1.0
+    x_velocity = s[13] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L69
+    forward_reward = x_velocity
+
+    rewards = healthy_reward + forward_reward
+
+    contact_force = s[27:] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L85
+    contact_cost_weight = 5e-4
+    contact_cost = contact_cost_weight * np.sum(np.square(contact_force))
+    control_cost_weight = .5
+    control_cost = control_cost_weight * np.sum(np.square(a))
+
+    costs = contact_cost + control_cost
+    reward = rewards - costs
+
+    return reward
+
 class MDP(object):
-    def __init__(self, dataset, negative_reward = 100, std = 0.01, num_epochs = 300, batch_size = 256, learning_rate = 5e-4, device='cpu'):
+    def __init__(self, dataset, env_name, negative_reward = 100, std = 0.01, num_epochs = 300, batch_size = 256, learning_rate = 5e-4, device='cpu'):
         """Models a pessimistic MDP for the MOReL algorithm.
         :param dataset: The dataset to use for training. It is expected to be a list of trajectories where each
         trajectory is a dictionary of the form {'observations': [], 'actions': [], 'rewards': []}.
 
         Interface for this class is (mostly) taken from the WorldModel class from MBRL:
         https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L7"""
+        self.env_name = env_name
 
         self.std = std
 
@@ -23,7 +45,11 @@ class MDP(object):
         self.action_size = 0
         self.state_size = 0
 
-        self.negative_reward = 100
+        # for simplicity's sake, we'll just set the absorbing state to be all 0s. I'm not sure if this is how they
+        #   actually did it in the MOReL paper, but it is what I am going with for now.
+        self.absorbing_state = torch.zeros(self.state_size)
+        self.absorbing_state.to(device)
+
         # this is from the WorldModel class. Even though we don't 'technically' learn a rewards network,
         #   if we want ModelBasedNPG to use our USAD-based reward function, we need to set this to true
         self.learn_reward = True
@@ -33,13 +59,17 @@ class MDP(object):
         self.usad = lambda s, a: False
 
         self._init_statistics(dataset)
+        self.negative_reward = self.min_reward - negative_reward
+
         dynamics_model_args = [self.state_size, self.action_size,
                                self.state_mean, self.state_std,
                                self.action_mean, self.action_std,
                                self.state_difference_std,
                                std,
                                device]
+
         self.dynamics_model = DynamicsModel(*dynamics_model_args)
+        self.dynamics_model.to(device)
         self.dynamics_model.fit(dataset, num_epochs, batch_size, learning_rate)
 
 
@@ -69,34 +99,63 @@ class MDP(object):
 
     def to(self, device):
         self.dynamics_model.to(device)
+        self.absorbing_state.to(device)
 
     def is_cuda(self):
         return self.dynamics_model.device.startswith('cuda')
 
     def forward(self, s, a):
-        # modified from: https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L47
-        if type(s) == np.ndarray:
-            s = torch.from_numpy(s).float()
-        if type(a) == np.ndarray:
-            a = torch.from_numpy(a).float()
-        return self.dynamics_model.forward(s, a)
+        # if the USAD returns true, then the state is unknown to our model, so we should return the absorbing state
+        if self.usad(s, a):
+            return self.absorbing_state
+        # otherwise, just use the dynamics model to predict the next state
+        else:
+            # modified from: https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L47
+            if type(s) == np.ndarray:
+                s = torch.from_numpy(s).float()
+            if type(a) == np.ndarray:
+                a = torch.from_numpy(a).float()
+
+            return self.dynamics_model.predict(s, a)
 
     def predict(self, s, a):
-        # modified from: https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L56
-        s = torch.from_numpy(s).float()
-        a = torch.from_numpy(a).float()
-        s_next = self.dynamics_model.forward(s, a)
-        s_next = s_next.to('cpu').data.numpy()
-        return s_next
+        # if the USAD returns true, then the state is unknown to our model, so we should return the absorbing state
+        if self.usad(s, a):
+            return self.absorbing_state.to('cpu').data.numpy()
+        # otherwise, just use the dynamics model to predict the next state
+        else:
+            # modified from: https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L56
+            s = torch.from_numpy(s).float()
+            a = torch.from_numpy(a).float()
+            s_next = self.dynamics_model.predict(s, a)
+            s_next = s_next.to('cpu').data.numpy()
+            return s_next
+
+    def reward(self, s, a):
+        if self.env_name == 'Ant-v2':
+            r = ant_reward
+        else:
+            raise NotImplementedError(f'Reward function not implemented for environment: {self.env_name}')
+
+        if s.equal(self.absorbing_state) or self.usad(s, a):
+            return self.negative_reward
+        else:
+            return r(s, a)
 
     def compute_path_rewards(self, paths):
         # from https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L150
         # paths has two keys: observations and actions
         # paths["observations"] : (num_traj, horizon, obs_dim)
         # paths["rewards"] should have shape (num_traj, horizon)
-        s, a, r = paths['observations'], paths['actions'], paths['rewards']
+        s, a = paths['observations'], paths['actions']
+        num_traj, horizon, _ = s.shape
 
+        rewards = np.zeros((num_traj, horizon))
+        for i in range(num_traj):
+            for j in range(horizon):
+                rewards[i, j] = self.reward(s[i, j], a[i, j])
 
+        paths['rewards'] = rewards
 
 
 class DynamicsModel(nn.Module):
@@ -145,13 +204,6 @@ class DynamicsModel(nn.Module):
         trajectory is a dictionary of the form {'observations': []], 'actions': [], 'rewards': []}. Each list
         will automatically be automatically converted to the device that the model is on"""
 
-        # shuffle the dataset. Thanks to Stack Overflow user sshashank124 for the code to shuffle multiple lists from
-        #   their answer here: https://stackoverflow.com/a/23289591
-        # dataset = list(zip(dataset['observations'],
-        #                    dataset['actions'],
-        #                    dataset['observations'][1:]))
-        # np.random.shuffle(dataset)
-        # s, a, s_prime = zip(*dataset)
         # convert the dataset into a single list of (s, a, s')
         dataset = [(s, a, s_prime) for trajectory in dataset for s, a, s_prime in zip(trajectory['observations'], trajectory['actions'], trajectory['observations'][1:])]
 
@@ -201,6 +253,7 @@ class DynamicsModel(nn.Module):
         super().to(device)
         self.device = device
 
+
 if __name__ == '__main__':
 
     # load the dataset
@@ -208,14 +261,30 @@ if __name__ == '__main__':
         dataset = pickle.load(dataset_file)
         print('loaded dataset')
 
-    mdp = MDP(dataset)
+
+    # s = dataset[0]['observations']
+    # a = dataset[0]['actions']
+    # r = np.array(dataset[0]['rewards'])
+    # print(np.expand_dims(np.expand_dims(s, axis=0), axis=0).shape)
+    # print(np.expand_dims(np.expand_dims(a, axis=0), axis=0).shape)
+    #
+    # path = {'observations': np.expand_dims(np.expand_dims(s, axis=0), axis=0),
+    #         'actions': np.expand_dims(np.expand_dims(a, axis=0), axis=0)}
+    # predicted_rewards= []
+    # for s_, a_, r_ in zip(s, a, r):
+    #     print('Actual Reward =', r_, ' Predicted Reward =' ,ant_reward(s_,a_))
+    #     predicted_rewards.append(ant_reward(s_,a_))
+    # print(np.mean(r - np.array(predicted_rewards)))
+    # print(np.std(r - np.array(predicted_rewards)))
+
+    mdp = MDP(dataset, num_epochs=2, env_name='Ant-v2', device='cuda:0')
     print(mdp.state_mean)
     print(mdp.state_std)
     print(mdp.action_mean)
     print(mdp.action_std)
     print(mdp.state_difference_std)
 
-    f = DynamicsModel(mdp.state_size, mdp.action_size, mdp.state_mean, mdp.state_std, mdp.action_mean, mdp.action_std, mdp.state_difference_std)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    f.to(device)
-    f.fit(dataset, num_epochs=50)
+    # f = DynamicsModel(mdp.state_size, mdp.action_size, mdp.state_mean, mdp.state_std, mdp.action_mean, mdp.action_std, mdp.state_difference_std)
+    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # f.to(device)
+    # f.fit(dataset, num_epochs=50)
