@@ -25,7 +25,16 @@ def ant_reward(s,a):
     return reward
 
 class MDP(object):
-    def __init__(self, dataset, env_name, negative_reward = 100, std = 0.01, num_epochs = 300, batch_size = 256, learning_rate = 5e-4, device='cpu'):
+    def __init__(self,
+                 dataset,
+                 env_name,
+                 negative_reward = 100,
+                 std = 0.01,
+                 num_epochs = 300,
+                 batch_size = 256,
+                 learning_rate = 5e-4,
+                 device='cpu',
+                 model_path=None):
         """Models a pessimistic MDP for the MOReL algorithm.
         :param dataset: The dataset to use for training. It is expected to be a list of trajectories where each
         trajectory is a dictionary of the form {'observations': [], 'actions': [], 'rewards': []}.
@@ -69,8 +78,11 @@ class MDP(object):
                                device]
 
         self.dynamics_model = DynamicsModel(*dynamics_model_args)
-        self.dynamics_model.to(device)
-        self.dynamics_model.fit(dataset, num_epochs, batch_size, learning_rate)
+        if model_path:
+            print(f'MDP: Loading dynamics model from {model_path}')
+            self.dynamics_model.load_state_dict(torch.load(model_path))
+        else:
+            self.dynamics_model.fit(dataset, num_epochs, batch_size, learning_rate)
 
 
     def _init_statistics(self, dataset):
@@ -157,6 +169,8 @@ class MDP(object):
 
         paths['rewards'] = rewards
 
+    def save(self, filename):
+        torch.save(self.dynamics_model.state_dict(), filename)
 
 class DynamicsModel(nn.Module):
     def __init__(self, state_size, action_size, state_mean, state_std, action_mean, action_std, state_difference_std, std = 0.01, device = 'cpu'):
@@ -172,7 +186,9 @@ class DynamicsModel(nn.Module):
         self.action_mean = action_mean
         self.action_std = action_std
         self.state_difference_std = state_difference_std
+
         self.device = device
+        self.to(device)
 
 
     def forward(self, s, a):
@@ -257,10 +273,9 @@ class DynamicsModel(nn.Module):
 if __name__ == '__main__':
 
     # load the dataset
-    with open('dataset/TRPO_Ant-v2_50000', 'rb') as dataset_file:
+    with open('dataset/TRPO_Ant-v2_1e6', 'rb') as dataset_file:
         dataset = pickle.load(dataset_file)
         print('loaded dataset')
-
 
     # s = dataset[0]['observations']
     # a = dataset[0]['actions']
@@ -276,13 +291,15 @@ if __name__ == '__main__':
     #     predicted_rewards.append(ant_reward(s_,a_))
     # print(np.mean(r - np.array(predicted_rewards)))
     # print(np.std(r - np.array(predicted_rewards)))
-
-    mdp = MDP(dataset, num_epochs=2, env_name='Ant-v2', device='cuda:0')
+    mdp_model_file = 'trained_models/MDP_Ant-v2_1000000'
+    mdp = MDP(dataset, num_epochs=300, env_name='Ant-v2', device='cuda:0')
     print(mdp.state_mean)
     print(mdp.state_std)
     print(mdp.action_mean)
     print(mdp.action_std)
     print(mdp.state_difference_std)
+
+    mdp.save(mdp_model_file)
 
     # f = DynamicsModel(mdp.state_size, mdp.action_size, mdp.state_mean, mdp.state_std, mdp.action_mean, mdp.action_std, mdp.state_difference_std)
     # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
