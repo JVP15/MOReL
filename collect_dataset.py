@@ -10,7 +10,7 @@ from sb3_contrib import TRPO
 ACTION_NOISE_OPTIONS = ['pure', 'gauss', 'random']
 DEFAULT_ACTION_NOISE = ['pure', 0.0] # the command line arg expects two values, but the 'pure' option doesn't need any extra values
 DEFAULT_ITERATIONS = 1000000
-DEFAULT_HORIZON = 500
+DEFAULT_TRAJECTORY_LENGTH = 500
 DEFAULT_DATASET_DIR = './dataset'
 DEFAULT_VERBOSE = 0
 
@@ -102,7 +102,7 @@ def collect_dataset(env, model, iterations, dataset_dir, action_noise, steps_per
 
 if __name__ == '__main__':
     # example usage: python collect_dataset.py --env Ant-v2 --policy trained_policies/TRPO_Ant-v2_1000.zip --dir ./dataset
-    # python collect_dataset.py --env Hopper-v2 --policy trained_policies/TRPO_Hopper-v2_1000.zip --dir ./dataset --iterations 50000 --horizon 400
+    # python collect_dataset.py --env Hopper-v2 --policy trained_policies/TRPO_Hopper-v2_1000.zip --dir ./dataset --iterations 50000 --trajectory-length 400
 
     parser = argparse.ArgumentParser(formatter_class=RawTextHelpFormatter)
     parser.add_argument('--env', type=str, required=True, help='<Required> environment to run')
@@ -120,7 +120,7 @@ if __name__ == '__main__':
     20%% of the dataset is collected using a uniform random policy""")
 
     parser.add_argument('--iterations', type=int, default=DEFAULT_ITERATIONS, help=f'number of iterations to save (default: {DEFAULT_ITERATIONS})')
-    parser.add_argument('--horizon', type=int, default=DEFAULT_HORIZON, help=f'number of steps to take when collecting each trajectory (default: {DEFAULT_HORIZON}')
+    parser.add_argument('--trajectory-length', type=int, default=DEFAULT_TRAJECTORY_LENGTH, help=f'number of steps to take when collecting each trajectory (default: {DEFAULT_TRAJECTORY_LENGTH}')
     parser.add_argument('--dir', type=str, default=DEFAULT_DATASET_DIR, help=f'directory to save dataset (default: {DEFAULT_DATASET_DIR})')
     args = parser.parse_args()
 
@@ -131,6 +131,6 @@ if __name__ == '__main__':
     env = gym.make(args.env)
     model = TRPO.load(args.policy, env=env)
 
-    collect_dataset(env=env, model=model, iterations=args.iterations, dataset_dir=args.dir, steps_per_trajectory=args.horizon,
+    collect_dataset(env=env, model=model, iterations=args.iterations, dataset_dir=args.dir, steps_per_trajectory=args.trajectory_length,
                     action_noise=args.action_noise[0], action_noise_arg=float(args.action_noise[1]))
 

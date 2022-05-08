@@ -39,6 +39,10 @@ class MDP(object):
         :param dataset: The dataset to use for training. It is expected to be a list of trajectories where each
         trajectory is a dictionary of the form {'observations': [], 'actions': [], 'rewards': []}.
 
+        :param model_path: The path to a saved dynamics model. NOTE: if you are loading a model, you should load the
+        model should have been trained using the dataset provided, otherwise the MDP statistics (mean and std for
+        state and actions) could be differen than the statistics that were used to train the saved dynamics model.
+
         Interface for this class is (mostly) taken from the WorldModel class from MBRL:
         https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L7"""
         self.env_name = env_name
@@ -169,11 +173,27 @@ class MDP(object):
 
         paths['rewards'] = rewards
 
+    def compute_loss(self, s, a, s_next):
+        # taken from https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L79
+        # Intended for logging use only, not for loss computation
+
+        sp = self.forward(s, a)
+        s_next = torch.from_numpy(s_next).float() if type(s_next) == np.ndarray else s_next
+        s_next = s_next.to(self.dynamics_model.device)
+
+        loss_func = nn.MSELoss()
+        loss = loss_func(sp, s_next)
+        return loss.to('cpu').data.numpy()
+
     def save(self, filename):
         torch.save(self.dynamics_model.state_dict(), filename)
 
 class DynamicsModel(nn.Module):
     def __init__(self, state_size, action_size, state_mean, state_std, action_mean, action_std, state_difference_std, std = 0.01, device = 'cpu'):
+        """This is the dynamics model from the MOReL algorithm. It is used by both the MDP and the USAD. It is equivalent
+        to N(f(s,a), SIGMA) where f(s,a) = s + s_diff_std * MLP((s - s_mean) / s_std, (a - a_mean) / a_std)).
+        The MLP uses 2 hidden layers with 512 neurons and RELU activation."""
+
         super().__init__()
         self.fc1 = nn.Linear(state_size + action_size, 512)
         self.fc2 = nn.Linear(512, 512)
@@ -273,7 +293,7 @@ class DynamicsModel(nn.Module):
 if __name__ == '__main__':
 
     # load the dataset
-    with open('dataset/TRPO_Ant-v2_1e6', 'rb') as dataset_file:
+    with open('dataset/TRPO_Ant-v2_50000', 'rb') as dataset_file:
         dataset = pickle.load(dataset_file)
         print('loaded dataset')
 
@@ -291,8 +311,8 @@ if __name__ == '__main__':
     #     predicted_rewards.append(ant_reward(s_,a_))
     # print(np.mean(r - np.array(predicted_rewards)))
     # print(np.std(r - np.array(predicted_rewards)))
-    mdp_model_file = 'trained_models/MDP_Ant-v2_1000000'
-    mdp = MDP(dataset, num_epochs=300, env_name='Ant-v2', device='cuda:0')
+    mdp_model_file = 'trained_models/MDP_Ant-v2_1e6'
+    mdp = MDP(dataset, num_epochs=300, env_name='Ant-v2', device='cuda:0', model_path=mdp_model_file)
     print(mdp.state_mean)
     print(mdp.state_std)
     print(mdp.action_mean)

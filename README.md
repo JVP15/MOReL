@@ -6,7 +6,7 @@ This is an implementation of the MOReL offline reinforcement learning algorithm 
 ## :heavy_check_mark: Dynamic Model Learning 
 MOReL uses a Gaussian dynamics `P(*|s,a) = N(f(s,a), Σ)`. 
 
-* :construction: Train the neural network used by `f(s,a)` on the dataset using maximum likelihood estimation. The model has been trained, but saving and loading the model ahs not been implemented yet. 
+* :construction: Train the neural network used by `f(s,a)` on the dataset using maximum likelihood estimation. The model for the Ant-v2 Pure dataset has been trained and uploaded. 
 * :heavy_check_mark: Implement `f(s,a)` (see the bottom of [page 6](https://arxiv.org/pdf/2005.05951.pdf#page=6))
 
 ## :x: USAD
@@ -16,7 +16,7 @@ MOReL uses an Unknown State-Action Detector (USAD) to identify what states are k
 * :x: Implement USAD (for threshold, see section C.5 on [page 21](https://arxiv.org/pdf/2005.05951.pdf#page=21))
 * :x: Train the USAD dynamics models. 
 
-## :x: Dataset
+## :heavy_check_mark: Dataset
 
 The MOReL algorithm was trained and tested using 4 environments: HalfCheetah-v2, Hopper-v2, Walker2D-v2, and ~~Headcrab~~ Ant-v2. 5 datasets were generated for each environment (see section 5 on [page 7](https://arxiv.org/pdf/2005.05951.pdf#page=7) for a breakdown of how they were created). Each dataset contains 1,000,000 timesteps. The paper used a partially trained policy π to generate the dataset.
 
@@ -28,5 +28,5 @@ The MOReL algorithm was trained and tested using 4 environments: HalfCheetah-v2,
 
 The policy used in the MOReL paper plans using the dynamics model and the USAD. It is trained using a model-based NPG algorithm from [https://sites.google.com/view/mbrl-game](https://sites.google.com/view/mbrl-game).
 
-* :x: Implement the policy training algorithm 
+* :construction: Implement the policy training algorithm 
 * :x: Train the policy 
