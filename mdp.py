@@ -154,7 +154,7 @@ class MDP(object):
         else:
             raise NotImplementedError(f'Reward function not implemented for environment: {self.env_name}')
 
-        if s.equal(self.absorbing_state) or self.usad(s, a):
+        if np.array_equal(s, self.absorbing_state) or self.usad(s, a):
             return self.negative_reward
         else:
             return r(s, a)
