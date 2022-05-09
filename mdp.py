@@ -46,6 +46,7 @@ class MDP(object):
         Interface for this class is (mostly) taken from the WorldModel class from MBRL:
         https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L7"""
         self.env_name = env_name
+        self.device = device
 
         self.std = std
 
@@ -179,7 +180,7 @@ class MDP(object):
 
         sp = self.forward(s, a)
         s_next = torch.from_numpy(s_next).float() if type(s_next) == np.ndarray else s_next
-        s_next = s_next.to(self.dynamics_model.device)
+        s_next = s_next.to(self.device)
 
         loss_func = nn.MSELoss()
         loss = loss_func(sp, s_next)
@@ -210,7 +211,6 @@ class DynamicsModel(nn.Module):
         self.device = device
         self.to(device)
 
-
     def forward(self, s, a):
         # equivalent to f(s, a) in the paper
         # f(s,a) = s + s_diff_std * MLP((s - s_mean) / s_std, (a - a_mean) / a_std))
@@ -218,8 +218,12 @@ class DynamicsModel(nn.Module):
         s_normalized = (s - self.state_mean) / self.state_std
         a_normalized = (a - self.action_mean) / self.action_std
 
+        # make sure that the tensors are on the same device
+        s_normalized = s_normalized.to(self.device)
+        a_normalized = a_normalized.to(self.device)
+
         # concatenate s and a to create the input to the nn
-        mu = torch.cat((s_normalized, a_normalized), dim=-1).to(self.device)
+        mu = torch.cat((s_normalized, a_normalized), dim=-1)
 
         mu = self.fc1(mu)
         mu = torch.relu(mu)
@@ -229,8 +233,9 @@ class DynamicsModel(nn.Module):
 
         return mu
 
-    def sample(self, s, a):
+    def predict(self, s, a):
         # equivalent to N(f(s,a), SIGMA) in the paper where f(s,a) is given by forward
+        s = s.to(self.device)
         out = s + torch.normal(self.forward(s, a), self.std)
         return out
 
@@ -293,7 +298,7 @@ class DynamicsModel(nn.Module):
 if __name__ == '__main__':
 
     # load the dataset
-    with open('dataset/TRPO_Ant-v2_50000', 'rb') as dataset_file:
+    with open('dataset/TRPO_Ant-v2_1e6', 'rb') as dataset_file:
         dataset = pickle.load(dataset_file)
         print('loaded dataset')
 
@@ -312,7 +317,7 @@ if __name__ == '__main__':
     # print(np.mean(r - np.array(predicted_rewards)))
     # print(np.std(r - np.array(predicted_rewards)))
     mdp_model_file = 'trained_models/MDP_Ant-v2_1e6'
-    mdp = MDP(dataset, num_epochs=300, env_name='Ant-v2', device='cuda:0', model_path=mdp_model_file)
+    mdp = MDP(dataset, num_epochs=300, env_name='Ant-v2', device='cuda:0')
     print(mdp.state_mean)
     print(mdp.state_std)
     print(mdp.action_mean)

@@ -28,13 +28,25 @@ from mjrl.algos.mbrl.sampling import sample_paths, evaluate_policy
 from mdp import MDP
 
 DEFAULT_OUTPUT_DIR = 'output'
+DEFAULT_DEVICE = 'cpu'
+DEFAULT_MODEL_PATH = None
+
+DEFAULT_EVAL_ROLLOUTS = 4
+DEFAULT_SAVE_FREQ = 25
+
 # default values are for Ant-v2
 DEFAULT_TRAINING_EPOCHS = 300
 DEFAULT_NEGATIVE_REWARD = 100
 
 DEFAULT_NPG_UPDATES = 1000
+DEFAULT_HORIZON = 500
+DEFAULT_INIT_LOG_STD = -.01
+DEFAULT_MIN_LOG_STD = -2
+DEFAULT_NUM_GRADIENT_TRAJECTORIES = 200
+DEFAULT_CG_STEPS = 10
 
-def run_morel(env_name, dataset, model_path, output_dir, device, dynamics_model_training_epochs, negative_reward, npg_kwargs):
+def run_morel(env_name, dataset, model_path, output_dir, device, dynamics_model_training_epochs, negative_reward,
+              eval_rollouts, save_freq, npg_kwargs):
     """Implementation of the MOReL algorithm from: https://arxiv.org/pdf/2005.05951.pdf
     :param env_name: name of the environment to run MOReL on
     :param dataset: the dataset to use for training the MDP and dynamics models. It should be a list of trajectories
@@ -72,17 +84,17 @@ def run_morel(env_name, dataset, model_path, output_dir, device, dynamics_model_
     mdp = MDP(dataset=dataset, env_name=env_name, num_epochs=dynamics_model_training_epochs,
               negative_reward=negative_reward, device=device, model_path=model_path)
 
-    policy = MLP(e.spec, hidden_sizes=job_data['policy_size'],
-                        init_log_std=job_data['init_log_std'], min_log_std=job_data['min_log_std'])
+    policy = MLP(e.spec, hidden_sizes=npg_kwargs['policy_size'],
+                        init_log_std=npg_kwargs['init_log_std'], min_log_std=npg_kwargs['min_log_std'])
 
     baseline = MLPBaseline(e.spec, reg_coef=1e-3, batch_size=256, epochs=1,  learn_rate=1e-3,
                            device=device)
 
     # the agent will use the pessemistic MDP for its learned model
     agent = ModelBasedNPG(learned_model=[mdp], env=e, policy=policy, baseline=baseline,
-                          normalized_step_size=job_data['step_size'], save_logs=True,
+                          normalized_step_size=npg_kwargs['step_size'], save_logs=True,
                           termination_function=termination_function, device=device,
-                          **npg_kwargs)
+                          **npg_kwargs['npg_hp'])
 
     # ===============================================================================
     # Create the initial state buffer and log some statistics about the dataset/MDP
@@ -95,7 +107,7 @@ def run_morel(env_name, dataset, model_path, output_dir, device, dynamics_model_
     a = np.concatenate([trajectory['actions'][:-1] for trajectory in dataset])
     sp = np.concatenate([trajectory['observations'][1:] for trajectory in dataset])
     rollout_score = np.mean([np.sum(trajectory['rewards']) for trajectory in dataset])
-    num_samples = np.sum([trajectory['rewards'].shape[0] for trajectory in dataset])
+    num_samples = np.sum([len(trajectory['rewards']) for trajectory in dataset])
 
     logger.log_kv('fit_epochs', dynamics_model_training_epochs)
     logger.log_kv('rollout_score', rollout_score)
@@ -119,79 +131,89 @@ def run_morel(env_name, dataset, model_path, output_dir, device, dynamics_model_
     # ===============================================================================
     # Policy Optimization Loop (for the Model-Based NPG algorithm)
     # ===============================================================================
+    # print('Starting policy optimization...')
+    # for npg_iteration in range(npg_kwargs['num_updates']):
+    #     ts = timer.time()
+    #     agent.to(device)
+    #
+    #     print('sampling from initial state distribution')
+    #     buffer_rand_idx = np.random.choice(len(init_states_buffer), size=npg_kwargs['num_gradient_trajectories'],
+    #                                        replace=True).tolist()
+    #     init_states = [init_states_buffer[idx] for idx in buffer_rand_idx]
+    #
+    #
+    #     train_stats = agent.train_step(N=len(init_states), init_states=init_states, **npg_kwargs)
+    #     logger.log_kv('train_score', train_stats[0])
+    #     agent.policy.to('cpu')
+    #
+    #     # evaluate true policy performance
+    #     if eval_rollouts > 0:
+    #         print("Performing validation rollouts ... ")
+    #         # set the policy device back to CPU for env sampling
+    #         eval_paths = evaluate_policy(agent.env, agent.policy, agent.learned_model[0], noise_level=0.0,
+    #                                      real_step=True, num_episodes=eval_rollouts, visualize=False)
+    #         eval_score = np.mean([np.sum(p['rewards']) for p in eval_paths])
+    #         logger.log_kv('eval_score', eval_score)
+    #         try:
+    #             eval_metric = e.env.env.evaluate_success(eval_paths)
+    #             logger.log_kv('eval_metric', eval_metric)
+    #         except:
+    #             pass
+    #     else:
+    #         eval_score = -1e8
+    #
+    #     # track best performing policy
+    #     policy_score = eval_score if eval_rollouts > 0 else rollout_score
+    #     if policy_score > best_perf:
+    #         best_policy = copy.deepcopy(policy)  # safe as policy network is clamped to CPU
+    #         best_perf = policy_score
+    #
+    #     tf = timer.time()
+    #     logger.log_kv('iter_time', tf - ts)
+    #     for key in agent.logger.log.keys():
+    #         logger.log_kv(key, agent.logger.log[key][-1])
+    #     print_data = sorted(filter(lambda v: np.asarray(v[1]).size == 1,
+    #                                logger.get_current_log_print().items()))
+    #     print(tabulate(print_data))
+    #     logger.save_log(output_dir + '/logs')
+    #
+    #     if npg_iteration > 0 and npg_iteration % save_freq == 0:
+    #         # convert to CPU before pickling
+    #         agent.to('cpu')
+    #         # make observation mask part of policy for easy deployment in environment
+    #         old_in_scale = policy.in_scale
+    #         for pi in [policy, best_policy]: pi.set_transformations(in_scale=1.0 / e.obs_mask)
+    #         pickle.dump(agent, open(output_dir + f'/iterations/{env_name}_agent_{npg_iteration}.pickle', 'wb'))
+    #         pickle.dump(policy, open(output_dir + f'/iterations/{env_name}_policy_{npg_iteration}.pickle', 'wb'))
+    #         pickle.dump(best_policy, open(output_dir + f'/iterations/{env_name}_best_policy.pickle', 'wb'))
+    #         agent.to(device)
+    #         for pi in [policy, best_policy]: pi.set_transformations(in_scale=old_in_scale)
+    #         make_train_plots(log=logger.log, keys=['rollout_score', 'eval_score', 'rollout_metric', 'eval_metric'],
+    #                          x_scale=1.0, y_scale=1.0, save_loc=output_dir + '/logs/')
+    #
+    # # final save
+    # pickle.dump(agent, open(output_dir + '/iterations/agent_final.pickle', 'wb'))
+    # policy.set_transformations(in_scale=1.0 / e.obs_mask)
+    # pickle.dump(policy, open(output_dir + '/iterations/policy_final.pickle', 'wb'))
 
-    for npg_iteration in range(npg_kwargs['num_updates']):
-        ts = timer.time()
-        agent.to(job_data['device'])
-        if job_data['start_state'] == 'init':
-            print('sampling from initial state distribution')
-            buffer_rand_idx = np.random.choice(len(init_states_buffer), size=job_data['update_paths'],
-                                               replace=True).tolist()
-            init_states = [init_states_buffer[idx] for idx in buffer_rand_idx]
-        else:
-            # Mix data between initial states and randomly sampled data from buffer
-            print("sampling from mix of initial states and data buffer")
-            if 'buffer_frac' in job_data.keys():
-                num_states_1 = int(job_data['update_paths'] * (1 - job_data['buffer_frac'])) + 1
-                num_states_2 = int(job_data['update_paths'] * job_data['buffer_frac']) + 1
-            else:
-                num_states_1, num_states_2 = job_data['update_paths'] // 2, job_data['update_paths'] // 2
-            buffer_rand_idx = np.random.choice(len(init_states_buffer), size=num_states_1, replace=True).tolist()
-            init_states_1 = [init_states_buffer[idx] for idx in buffer_rand_idx]
-            buffer_rand_idx = np.random.choice(s.shape[0], size=num_states_2, replace=True)
-            init_states_2 = list(s[buffer_rand_idx])
-            init_states = init_states_1 + init_states_2
+if __name__ == '__main__':
 
-        train_stats = agent.train_step(N=len(init_states), init_states=init_states, **job_data)
-        logger.log_kv('train_score', train_stats[0])
-        agent.policy.to('cpu')
+    npg_kwargs = dict(policy_size=(32, 32),
+                      init_log_std=DEFAULT_INIT_LOG_STD,
+                      min_log_std=DEFAULT_MIN_LOG_STD,
+                      step_size=.02,
+                      num_updates=DEFAULT_NPG_UPDATES,
+                      horizon=DEFAULT_HORIZON,
+                      num_gradient_trajectories=DEFAULT_NUM_GRADIENT_TRAJECTORIES,
+                      npg_hp=dict(FIM_invert_args={'iters': DEFAULT_CG_STEPS, 'damping': 1e-4}),
+                      gamma=0.999, # gamma and gae_lambda are not hyperparameters in the paper,
+                      gae_lambda=.97,) # but they can be found in https://github.com/aravindr93/mjrl/blob/v2/projects/morel/configs/hopper_v3_morel.txt, so I included them anyways
 
-        # evaluate true policy performance
-        if job_data['eval_rollouts'] > 0:
-            print("Performing validation rollouts ... ")
-            # set the policy device back to CPU for env sampling
-            eval_paths = evaluate_policy(agent.env, agent.policy, agent.learned_model[0], noise_level=0.0,
-                                         real_step=True, num_episodes=job_data['eval_rollouts'], visualize=False)
-            eval_score = np.mean([np.sum(p['rewards']) for p in eval_paths])
-            logger.log_kv('eval_score', eval_score)
-            try:
-                eval_metric = e.env.env.evaluate_success(eval_paths)
-                logger.log_kv('eval_metric', eval_metric)
-            except:
-                pass
-        else:
-            eval_score = -1e8
+    dataset_name = 'dataset/TRPO_Ant-v2_1e6'
+    with open(dataset_name, 'rb') as dataset_file:
+        dataset = pickle.load(dataset_file)
+        print(f'Loaded dataset {dataset_name}')
 
-        # track best performing policy
-        policy_score = eval_score if job_data['eval_rollouts'] > 0 else rollout_score
-        if policy_score > best_perf:
-            best_policy = copy.deepcopy(policy)  # safe as policy network is clamped to CPU
-            best_perf = policy_score
-
-        tf = timer.time()
-        logger.log_kv('iter_time', tf - ts)
-        for key in agent.logger.log.keys():
-            logger.log_kv(key, agent.logger.log[key][-1])
-        print_data = sorted(filter(lambda v: np.asarray(v[1]).size == 1,
-                                   logger.get_current_log_print().items()))
-        print(tabulate(print_data))
-        logger.save_log(OUT_DIR + '/logs')
-
-        if npg_iteration > 0 and npg_iteration % job_data['save_freq'] == 0:
-            # convert to CPU before pickling
-            agent.to('cpu')
-            # make observation mask part of policy for easy deployment in environment
-            old_in_scale = policy.in_scale
-            for pi in [policy, best_policy]: pi.set_transformations(in_scale=1.0 / e.obs_mask)
-            pickle.dump(agent, open(output_dir + f'/iterations/{env_name}_agent_{npg_iteration}.pickle', 'wb'))
-            pickle.dump(policy, open(output_dir + f'/iterations/{env_name}_policy_{npg_iteration}.pickle', 'wb'))
-            pickle.dump(best_policy, open(output_dir + f'/iterations/{env_name}_best_policy.pickle', 'wb'))
-            agent.to(job_data['device'])
-            for pi in [policy, best_policy]: pi.set_transformations(in_scale=old_in_scale)
-            make_train_plots(log=logger.log, keys=['rollout_score', 'eval_score', 'rollout_metric', 'eval_metric'],
-                             x_scale=float(job_data['act_repeat']), y_scale=1.0, save_loc=output_dir + '/logs/')
-
-    # final save
-    pickle.dump(agent, open(OUT_DIR + '/iterations/agent_final.pickle', 'wb'))
-    policy.set_transformations(in_scale=1.0 / e.obs_mask)
-    pickle.dump(policy, open(OUT_DIR + '/iterations/policy_final.pickle', 'wb'))
+    run_morel(env_name='Ant-v2', dataset=dataset, model_path='trained_models/MDP_Ant-v2_1e6', output_dir=DEFAULT_OUTPUT_DIR, device='cuda', dynamics_model_training_epochs=DEFAULT_TRAINING_EPOCHS,
+              negative_reward=DEFAULT_NEGATIVE_REWARD, eval_rollouts=DEFAULT_EVAL_ROLLOUTS, save_freq=DEFAULT_SAVE_FREQ,
+                npg_kwargs=npg_kwargs)
