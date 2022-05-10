@@ -58,17 +58,17 @@ def collect_dataset(env, model, iterations, dataset_dir, action_noise, steps_per
     step_num = 0
     for i in range(iterations):
 
-
         if action_noise == 'pure':
             action, _state = model.predict(obs, deterministic=True)
         else:
             action = sample_for_noisy_dataset(obs, model, i, iterations, action_noise, action_noise_arg)
 
-        obs, reward, done, _info = env.step(action)
+        next_obs, reward, done, _info = env.step(action)
 
         observations.append(obs)
         actions.append(action)
         rewards.append(reward)
+        obs = next_obs
         step_num += 1
 
         # if the episode is done, reset the environment, collect the observations, actions, and rewards into a
