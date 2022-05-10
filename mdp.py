@@ -1,3 +1,5 @@
+import argparse
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -276,7 +278,7 @@ class DynamicsModel(nn.Module):
                 optimizer.zero_grad()
 
                 # get the next state predictions
-                next_states = self.sample(s_batch, a_batch)
+                next_states = self.predict(s_batch, a_batch)
 
                 # compute the loss
                 loss = loss_fn(next_states, s_prime_batch)
@@ -296,37 +298,26 @@ class DynamicsModel(nn.Module):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--env', type=str, required=True)
+    parser.add_argument('--dataset', type=str, required=True)
+    parser.add_argument('--output', type=str, required=True)
+    parser.add_argument('--num_epochs', type=int, default=300)
+    parser.add_argument('--negative-reward', type=float, default=50.0)
+    parser.add_argument('--device', type=str, default='cuda')
+    args = parser.parse_args()
 
     # load the dataset
-    with open('dataset/TRPO_Ant-v2_1e6', 'rb') as dataset_file:
+    with open(args.dataset, 'rb') as dataset_file:
         dataset = pickle.load(dataset_file)
-        print('loaded dataset')
+        print(f'loaded dataset {args.dataset}')
 
-    # s = dataset[0]['observations']
-    # a = dataset[0]['actions']
-    # r = np.array(dataset[0]['rewards'])
-    # print(np.expand_dims(np.expand_dims(s, axis=0), axis=0).shape)
-    # print(np.expand_dims(np.expand_dims(a, axis=0), axis=0).shape)
-    #
-    # path = {'observations': np.expand_dims(np.expand_dims(s, axis=0), axis=0),
-    #         'actions': np.expand_dims(np.expand_dims(a, axis=0), axis=0)}
-    # predicted_rewards= []
-    # for s_, a_, r_ in zip(s, a, r):
-    #     print('Actual Reward =', r_, ' Predicted Reward =' ,ant_reward(s_,a_))
-    #     predicted_rewards.append(ant_reward(s_,a_))
-    # print(np.mean(r - np.array(predicted_rewards)))
-    # print(np.std(r - np.array(predicted_rewards)))
-    mdp_model_file = 'trained_models/MDP_Ant-v2_1e6'
-    mdp = MDP(dataset, num_epochs=300, env_name='Ant-v2', device='cuda:0')
+    mdp = MDP(dataset, num_epochs=args.num_epochs, env_name=args.env,
+              device=args.device, negative_reward=args.negative_reward)
     print(mdp.state_mean)
     print(mdp.state_std)
     print(mdp.action_mean)
     print(mdp.action_std)
     print(mdp.state_difference_std)
 
-    mdp.save(mdp_model_file)
-
-    # f = DynamicsModel(mdp.state_size, mdp.action_size, mdp.state_mean, mdp.state_std, mdp.action_mean, mdp.action_std, mdp.state_difference_std)
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    # f.to(device)
-    # f.fit(dataset, num_epochs=50)
+    mdp.save(args.output)
