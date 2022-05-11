@@ -1,3 +1,5 @@
+import time
+
 import argparse
 
 import torch
@@ -6,8 +8,11 @@ import numpy as np
 import pickle
 
 def ant_reward(s,a):
-    # mimics reward function for the ant environment from:
-    # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L241
+    # mimics reward function for the ant-v2 environment from:
+    # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant.py (for values)
+    # and
+    # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py
+    # for information about what each value in the state represents
     # for some reason, it isn't the exact same reward, but it is close enough, so we'll use it
     healthy_reward = 1.0
     x_velocity = s[13] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L69
@@ -16,8 +21,8 @@ def ant_reward(s,a):
     rewards = healthy_reward + forward_reward
 
     contact_force = s[27:] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L85
-    contact_cost_weight = 5e-4
-    contact_cost = contact_cost_weight * np.sum(np.square(contact_force))
+    contact_cost_weight = 1e-3
+    contact_cost = contact_cost_weight * np.sum(np.square(np.clip(contact_force, -1, 1)))
     control_cost_weight = .5
     control_cost = control_cost_weight * np.sum(np.square(a))
 
@@ -266,16 +271,19 @@ class DynamicsModel(nn.Module):
                 batch = dataset[i:i + batch_size]
                 # separate the list of s, a, and s' out of the batch of data. We have to convert them to tensors and
                 #  put them on the same device as the model before we can start training with them. We also have to
-                #  convert them to floats for some reason (it throws an error if I don't)
+                #  convert them to floats because the model expects them to be floats not Doubles
+
                 s_batch = np.array([data[0] for data in batch])
                 a_batch = np.array([data[1] for data in batch])
                 s_prime_batch = np.array([data[2] for data in batch])
-                
-                s_batch = torch.tensor(s_batch).float().to(self.device)
-                a_batch = torch.tensor(a_batch).float().to(self.device)
-                s_prime_batch = torch.tensor(s_prime_batch).float().to(self.device)
 
-                optimizer.zero_grad()
+                s_batch = torch.tensor(s_batch, device=self.device, dtype=torch.float)
+                a_batch = torch.tensor(a_batch, device=self.device, dtype=torch.float)
+                s_prime_batch = torch.tensor(s_prime_batch, device=self.device, dtype=torch.float)
+
+                #optimizer.zero_grad()
+                for param in self.parameters():
+                    param.grad = None
 
                 # get the next state predictions
                 next_states = self.predict(s_batch, a_batch)
@@ -301,9 +309,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, required=True)
     parser.add_argument('--dataset', type=str, required=True)
-    parser.add_argument('--output', type=str, required=True)
     parser.add_argument('--num_epochs', type=int, default=300)
-    parser.add_argument('--negative-reward', type=float, default=50.0)
+    parser.add_argument('--output', type=str, required=True)
+    parser.add_argument('--negative-reward', type=float, default=100.0)
     parser.add_argument('--device', type=str, default='cuda')
     args = parser.parse_args()
 
@@ -321,3 +329,4 @@ if __name__ == '__main__':
     print(mdp.state_difference_std)
 
     mdp.save(args.output)
+
