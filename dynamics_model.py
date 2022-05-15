@@ -1,25 +1,34 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from torch.nn import Parameter
 
 class DynamicsModel(nn.Module):
-    def __init__(self, state_size, action_size, std = 0.01, device = 'cpu'):
+    def __init__(self, dataset = None, std = 0.01, device = 'cpu'):
         """This is the dynamics model from the MOReL algorithm. It is used by both the MDP and the USAD. It is equivalent
         to N(f(s,a), SIGMA) where f(s,a) = s + s_diff_std * MLP((s - s_mean) / s_std, (a - a_mean) / a_std)).
         The MLP uses 2 hidden layers with 512 neurons and RELU activation."""
 
         super().__init__()
-        self.fc1 = nn.Linear(state_size + action_size, 512)
-        self.fc2 = nn.Linear(512, 512)
-        self.fc3 = nn.Linear(512, state_size)
+
+        self.dataset = dataset
+        self.state_size = 0
+        self.action_size = 0
 
         self.std = std
 
-        self.state_mean = 0
-        self.state_std = 0
-        self.action_mean = 0
-        self.action_std = 0
-        self.state_difference_std = 0
+        # these are all important statistics about the dataset that the dynamics model was trained on, and by making
+        #  them torch.nn.Parameters, we can save and load them using the state_dict
+        self.state_mean = Parameter(torch.tensor(0.0, dtype=torch.float))
+        self.state_std = Parameter(torch.tensor(0.0, dtype=torch.float))
+        self.action_mean = Parameter(torch.tensor(0.0, dtype=torch.float))
+        self.action_std = Parameter(torch.tensor(0.0, dtype=torch.float))
+        self.state_difference_std = Parameter(torch.tensor(0.0, dtype=torch.float))
+        self._init_statistics(dataset)
+
+        self.fc1 = nn.Linear(self.state_size + self.action_size, 512)
+        self.fc2 = nn.Linear(512, 512)
+        self.fc3 = nn.Linear(512, self.state_size)
 
         self.device = device
         self.to(device)
@@ -27,7 +36,6 @@ class DynamicsModel(nn.Module):
     def forward(self, s, a):
         # equivalent to f(s, a) in the paper
         # f(s,a) = s + s_diff_std * MLP((s - s_mean) / s_std, (a - a_mean) / a_std))
-
         s_normalized = (s - self.state_mean) / self.state_std
         a_normalized = (a - self.action_mean) / self.action_std
 
@@ -52,16 +60,15 @@ class DynamicsModel(nn.Module):
         out = s + torch.normal(self.forward(s, a), self.std)
         return out
 
-    def fit(self, dataset, num_epochs = 300, batch_size = 256, learning_rate = 5e-4):
+    def fit(self, num_epochs = 300, batch_size = 256, learning_rate = 5e-4):
         """Trains the dynamics model using the given dataset.
         :param dataset: The dataset to use for training. It is expected to be a list of trajectories where each
         trajectory is a dictionary of the form {'observations': []], 'actions': [], 'rewards': []}. Each list
         will be automatically converted to the device that the model is on"""
 
-        self._init_statistics(dataset)
-
         # convert the dataset into a single list of (s, a, s')
-        dataset = [(s, a, s_prime) for trajectory in dataset for s, a, s_prime in zip(trajectory['observations'], trajectory['actions'], trajectory['observations'][1:])]
+        dataset = [(s, a, s_prime) for trajectory in self.dataset for s, a, s_prime in
+                   zip(trajectory['observations'], trajectory['actions'], trajectory['observations'][1:])]
 
         # shuffle the dataset
         np.random.shuffle(dataset)
@@ -124,8 +131,15 @@ class DynamicsModel(nn.Module):
             for i in range(len(trajectory['observations']) - 1):
                 all_state_diffs.append(trajectory['observations'][i + 1] - trajectory['observations'][i])
 
-        self.state_mean = np.mean(all_states)
-        self.state_std = np.std(all_states)
-        self.action_mean = np.mean(all_actions)
-        self.action_std = np.std(all_actions)
-        self.state_difference_std = np.std(all_state_diffs)
+        # I'm using the state_dict so that I reassign the values to the parameters instead of changing the object that
+        #  the variables point to
+        state_dict = self.state_dict()
+        state_dict['state_mean'] = torch.tensor(np.mean(all_states))
+        state_dict['state_std'] = torch.tensor(np.std(all_states))
+        state_dict['action_mean'] = torch.tensor(np.mean(all_actions))
+        state_dict['action_std'] = torch.tensor(np.std(all_actions))
+        state_dict['state_difference_std'] = torch.tensor(np.std(all_state_diffs))
+        self.load_state_dict(state_dict)
+
+        self.state_size = len(all_states[0])
+        self.action_size = len(all_actions[0])

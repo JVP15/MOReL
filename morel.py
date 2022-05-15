@@ -237,9 +237,16 @@ def run_morel(env_name, dataset, model_path, model_save_path, usad_folder_path, 
 
 if __name__ == '__main__':
     # example usage (and the arguments to run MOReL on Ant-v2 with a pure dataset of 10k steps)
-    # python morel.py --env Ant-v2 --dataset dataset/TRPO_Ant-v2_1000000 --output-dir ant_output --model trained_models/MDP_Ant-v2_1e6
+    """
+    python morel.py --env Ant-v2 --dataset dataset/TRPO_Ant-v2_1000000 --output-dir ant_output \
+        --model trained_models/MDP_Ant-v2_1e6 --usad-model trained_models/USAD_Ant-v2_1e6
+    """
     # to recreate the paper's Hopper-v2 use:
-    # python morel.py --env Hopper-v2 --dataset dataset/TRPO_Hopper-v2_1000000 --model trained_models/MDP_Hopper-v2_1e6 --output-dir hopper_output --horizon 400 --negative-reward 50 --num-npg-updates 500 --init-log-std -.25 --num-gradient-trajectories 50 --cg-steps 25
+    """
+    python morel.py --env Hopper-v2 --dataset dataset/TRPO_Hopper-v2_1000000 --model trained_models/MDP_Hopper-v2_1e6 \
+        --usad-model trained_models/USAD_Hopper-v2_1e6 --output-dir hopper_output --horizon 400 \
+        --negative-reward 50 --num-npg-updates 500 --init-log-std -.25 --num-gradient-trajectories 50 --cg-steps 25
+    """
 
     # these command line arguments are the hyperparamters and other settings that can change between environments
     parser = argparse.ArgumentParser()
