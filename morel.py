@@ -46,7 +46,8 @@ DEFAULT_MIN_LOG_STD = -2
 DEFAULT_NUM_GRADIENT_TRAJECTORIES = 200
 DEFAULT_CG_STEPS = 10
 
-def run_morel(env_name, dataset, model_path, model_save_path, output_dir, device, dynamics_model_training_epochs, negative_reward,
+def run_morel(env_name, dataset, model_path, model_save_path, usad_folder_path, usad_save_path,
+              output_dir, device, dynamics_model_training_epochs, negative_reward,
               eval_rollouts, save_freq, npg_kwargs):
     """Implementation of the MOReL algorithm from: https://arxiv.org/pdf/2005.05951.pdf
     :param env_name: name of the environment to run MOReL on
@@ -84,8 +85,7 @@ def run_morel(env_name, dataset, model_path, model_save_path, output_dir, device
         obs_mask = reward_functions.hopper_obs_mask
         # apply a scaling mask to all the observations in the dataset. It seems to perform poorly if we don't do this
         for trajectory in dataset:
-            trajectory['observation'] = [observation * obs_mask for observation in trajectory['observation']]
-
+            trajectory['observations'] = [observation * obs_mask for observation in trajectory['observations']]
     else:
         raise NotImplementedError(f'Termination function for environment {env_name} not implemented')
 
@@ -97,9 +97,13 @@ def run_morel(env_name, dataset, model_path, model_save_path, output_dir, device
     #   otherwise, the MDP will load the dynamics model from the model path
     # even though the paper has a learning rate of 5e-4, we use 1e-3 for consistency with the original MOReL code
     mdp = MDP(dataset=dataset, env_name=env_name, num_epochs=dynamics_model_training_epochs,
-              negative_reward=negative_reward, device=device, model_path=model_path, learning_rate=1e-3)
+              negative_reward=negative_reward, device=device, model_path=model_path, usad_folder=usad_folder_path
+              ,learning_rate=1e-3)
+
     if model_save_path is not None:
         mdp.save(model_save_path)
+    if usad_save_path is not None:
+        mdp.usad.save(usad_save_path)
 
     policy = MLP(e.spec, hidden_sizes=npg_kwargs['policy_size'],
                         init_log_std=npg_kwargs['init_log_std'], min_log_std=npg_kwargs['min_log_std'])
@@ -110,8 +114,8 @@ def run_morel(env_name, dataset, model_path, model_save_path, output_dir, device
     # the agent will use the pessemistic MDP for its learned model
     agent = ModelBasedNPG(learned_model=[mdp], env=e, policy=policy, baseline=baseline,
                           normalized_step_size=npg_kwargs['step_size'], save_logs=True,
-                          termination_function=termination_function, device=device,
-                          **npg_kwargs['npg_hp'])
+                          reward_function=mdp.compute_path_rewards, termination_function=termination_function,
+                          device=device, **npg_kwargs['npg_hp'])
 
     # ===============================================================================
     # Create the initial state buffer and log some statistics about the dataset/MDP
@@ -243,7 +247,9 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', type=str, required=True, help='<Required> dataset to use for training')
     parser.add_argument('--device', type=str, default=DEFAULT_DEVICE, help='device to run on')
     parser.add_argument('--model', type=str, default=DEFAULT_MODEL_PATH, help=f'<Default: {DEFAULT_MODEL_PATH}> pretrained MDP model to use for training. If none, the model will be trained from scratch.')
+    parser.add_argument('--usad-model', type=str, default=DEFAULT_MODEL_PATH, help=f'Default: {DEFAULT_MODEL_PATH}> folder containing pretrained dynamics models for the USAD. Note: this folder must contain *only* dynamics models.')
     parser.add_argument('--model-save-path', type=str, default=None, help=f'<Default: {None}> if the model path is None, the model will be trained and saved to this path.')
+    parser.add_argument('--usad-save-path', type=str, default=None, help=f'<Default: {None}> if the USAD model path is None, the USAD dynamics models will be saved to this folder.')
     parser.add_argument('--output-dir', type=str, default=DEFAULT_OUTPUT_DIR, help=f'<Default: {DEFAULT_OUTPUT_DIR}> output directory for logs and models')
 
     parser.add_argument('--model-training-epochs', type=int, default=DEFAULT_TRAINING_EPOCHS,
@@ -278,6 +284,7 @@ if __name__ == '__main__':
         print(f'Loaded dataset {args.dataset}')
 
     run_morel(env_name=args.env, dataset=dataset, model_path=args.model, model_save_path=args.model_save_path,
+              usad_folder_path=args.usad_model, usad_save_path=args.usad_save_path,
               output_dir=args.output_dir, device=args.device,
               dynamics_model_training_epochs=args.model_training_epochs,
               negative_reward=args.negative_reward,
