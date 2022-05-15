@@ -14,7 +14,7 @@ import mjrl.samplers.core as sampler
 import mjrl.utils.tensor_utils as tensor_utils
 from tqdm import tqdm
 
-
+import reward_functions
 from mjrl.policies.gaussian_mlp import MLP
 from mjrl.baselines.mlp_baseline import MLPBaseline
 from mjrl.baselines.quadratic_baseline import QuadraticBaseline
@@ -24,6 +24,7 @@ from mjrl.utils.make_train_plots import make_train_plots
 from mjrl.algos.mbrl.nn_dynamics import WorldModel
 from mjrl.algos.mbrl.model_based_npg import ModelBasedNPG
 from mjrl.algos.mbrl.sampling import sample_paths, evaluate_policy
+from mjrl.algos.behavior_cloning import BC
 
 from mdp import MDP
 
@@ -72,9 +73,21 @@ def run_morel(env_name, dataset, model_path, model_save_path, output_dir, device
     logger = DataLog()
 
     # create the environment using MJRL's gym environment class
-    action_repeat = 2 # it seems like the original MOReL code uses action repeat of 2
+    # it seems like the original MOReL code uses action repeat of 2, but our dataset was collected with action repeat of 1
+    action_repeat = 1
     e = GymEnv(env_name, act_repeat=action_repeat)
-    termination_function = getattr(e.env.env, "truncate_paths", None)
+
+    if env_name == 'Ant-v2':
+        termination_function = reward_functions.ant_termination_function
+    elif env_name == 'Hopper-v2':
+        termination_function = reward_functions.hopper_termination_function
+        obs_mask = reward_functions.hopper_obs_mask
+        # apply a scaling mask to all the observations in the dataset. It seems to perform poorly if we don't do this
+        for trajectory in dataset:
+            trajectory['observation'] = [observation * obs_mask for observation in trajectory['observation']]
+
+    else:
+        raise NotImplementedError(f'Termination function for environment {env_name} not implemented')
 
     # ===============================================================================
     # Setup the mdp, the policy, and the agent
@@ -82,8 +95,9 @@ def run_morel(env_name, dataset, model_path, model_save_path, output_dir, device
 
     # if the model path is none, then the MDP will automatically train its dynamics model using the dataset
     #   otherwise, the MDP will load the dynamics model from the model path
+    # even though the paper has a learning rate of 5e-4, we use 1e-3 for consistency with the original MOReL code
     mdp = MDP(dataset=dataset, env_name=env_name, num_epochs=dynamics_model_training_epochs,
-              negative_reward=negative_reward, device=device, model_path=model_path)
+              negative_reward=negative_reward, device=device, model_path=model_path, learning_rate=1e-3)
     if model_save_path is not None:
         mdp.save(model_save_path)
 
@@ -131,6 +145,15 @@ def run_morel(env_name, dataset, model_path, model_save_path, output_dir, device
     print(tabulate(print_data))
     logger.log_kv('act_repeat', action_repeat)
 
+    # ===============================================================================
+    # Behavior Cloning Initialization
+    # ===============================================================================
+    # There is no information about how behavior cloning is handled in the original
+    #   paper, but without behavior cloning, the planning algorithm doesn't work well,
+    #   so we've just used the implementation from the MOReL code.
+    policy.to(device)
+    bc_agent = BC(dataset, policy, epochs=5, batch_size=256, loss_type='MSE')
+    bc_agent.train()
 
     # ===============================================================================
     # Policy Optimization Loop (for the Model-Based NPG algorithm)
@@ -139,7 +162,7 @@ def run_morel(env_name, dataset, model_path, model_save_path, output_dir, device
     for npg_iteration in range(npg_kwargs['num_updates']):
         ts = timer.time()
         agent.to(device)
-
+        print(f'Iteration {npg_iteration}/{npg_kwargs["num_updates"]}')
         print('sampling from initial state distribution')
         buffer_rand_idx = np.random.choice(len(init_states_buffer), size=npg_kwargs['num_gradient_trajectories'],
                                            replace=True).tolist()
@@ -205,15 +228,20 @@ def run_morel(env_name, dataset, model_path, model_save_path, output_dir, device
 
     filename = 'mjrl/mjrl/utils/plot_from_logs.py'
     plot_file = os.path.join(output_dir, env_name + '.png')
-    data_file = os.path.join(output_dir, 'logs', 'logs.pickle')
+    data_file = os.path.join('../..', output_dir, 'logs/log.pickle')
     os.system(f'python {filename} --data {data_file} --output {plot_file}')
 
 if __name__ == '__main__':
+    # example usage (and the arguments to run MOReL on Ant-v2 with a pure dataset of 10k steps)
+    # python morel.py --env Ant-v2 --dataset dataset/TRPO_Ant-v2_1000000 --output-dir ant_output --model trained_models/MDP_Ant-v2_1e6
+    # to recreate the paper's Hopper-v2 use:
+    # python morel.py --env Hopper-v2 --dataset dataset/TRPO_Hopper-v2_1000000 --model trained_models/MDP_Hopper-v2_1e6 --output-dir hopper_output --horizon 400 --negative-reward 50 --num-npg-updates 500 --init-log-std -.25 --num-gradient-trajectories 50 --cg-steps 25
+
     # these command line arguments are the hyperparamters and other settings that can change between environments
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, required=True, help='<Required> environment to run on')
     parser.add_argument('--dataset', type=str, required=True, help='<Required> dataset to use for training')
-    parser.add_argument('--device', type=str, default='cuda', help='device to run on')
+    parser.add_argument('--device', type=str, default=DEFAULT_DEVICE, help='device to run on')
     parser.add_argument('--model', type=str, default=DEFAULT_MODEL_PATH, help=f'<Default: {DEFAULT_MODEL_PATH}> pretrained MDP model to use for training. If none, the model will be trained from scratch.')
     parser.add_argument('--model-save-path', type=str, default=None, help=f'<Default: {None}> if the model path is None, the model will be trained and saved to this path.')
     parser.add_argument('--output-dir', type=str, default=DEFAULT_OUTPUT_DIR, help=f'<Default: {DEFAULT_OUTPUT_DIR}> output directory for logs and models')
@@ -226,14 +254,15 @@ if __name__ == '__main__':
                         help=f'<Default: {DEFAULT_NUM_GRADIENT_TRAJECTORIES,}> number of trajectories to sample for gradient updates')
     parser.add_argument('--horizon', type=int, default=DEFAULT_HORIZON, help=f'<Default: {DEFAULT_HORIZON}> horizon for NPG updates')
     parser.add_argument('--init-log-std', type=float, default=DEFAULT_INIT_LOG_STD, help=f'<Default: {DEFAULT_INIT_LOG_STD}> initial log std for NPG updates')
-    parser.add_argument('--min_log_std', type=float, default=DEFAULT_MIN_LOG_STD, help=f'<Default: {DEFAULT_MIN_LOG_STD}> minimum log std for NPG updates')
+    parser.add_argument('--min-log-std', type=float, default=DEFAULT_MIN_LOG_STD, help=f'<Default: {DEFAULT_MIN_LOG_STD}> minimum log std for NPG updates')
     parser.add_argument('--cg-steps', type=int, default=DEFAULT_CG_STEPS, help=f'<Default: {DEFAULT_CG_STEPS}> number of CG steps')
 
     parser.add_argument('--eval-rollouts', type=int, default=DEFAULT_EVAL_ROLLOUTS, help=f'<Default: {DEFAULT_EVAL_ROLLOUTS}> number of rollouts to evaluate')
     parser.add_argument('--save-freq', type=int, default=DEFAULT_SAVE_FREQ, help=f'<Default: {DEFAULT_SAVE_FREQ}> number of iterations between saves')
     args = parser.parse_args()
 
-    npg_kwargs = dict(policy_size=(32, 32),
+    # even though the paper uses a (32, 32) policy size, the code uses a (64, 64) policy size, which seems to work better
+    npg_kwargs = dict(policy_size=(64, 64),
                       init_log_std=args.init_log_std,
                       min_log_std=args.min_log_std,
                       step_size=.02,

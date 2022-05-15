@@ -6,30 +6,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 import pickle
+import reward_functions
 
-def ant_reward(s,a):
-    # mimics reward function for the ant-v2 environment from:
-    # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant.py (for values)
-    # and
-    # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py
-    # for information about what each value in the state represents
-    # for some reason, it isn't the exact same reward, but it is close enough, so we'll use it
-    healthy_reward = 1.0
-    x_velocity = s[13] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L69
-    forward_reward = x_velocity
-
-    rewards = healthy_reward + forward_reward
-
-    contact_force = s[27:] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L85
-    contact_cost_weight = 1e-3
-    contact_cost = contact_cost_weight * np.sum(np.square(np.clip(contact_force, -1, 1)))
-    control_cost_weight = .5
-    control_cost = control_cost_weight * np.sum(np.square(a))
-
-    costs = contact_cost + control_cost
-    reward = rewards - costs
-
-    return reward
 
 class MDP(object):
     def __init__(self,
@@ -45,6 +23,8 @@ class MDP(object):
         """Models a pessimistic MDP for the MOReL algorithm.
         :param dataset: The dataset to use for training. It is expected to be a list of trajectories where each
         trajectory is a dictionary of the form {'observations': [], 'actions': [], 'rewards': []}.
+        :param env: The environment that the MDP is trained on. This is used solely for the reward function,
+        although if you aren't going to call the reward function, you can leave it as None
 
         :param model_path: The path to a saved dynamics model. NOTE: if you are loading a model, you should load the
         model should have been trained using the dataset provided, otherwise the MDP statistics (mean and std for
@@ -52,7 +32,10 @@ class MDP(object):
 
         Interface for this class is (mostly) taken from the WorldModel class from MBRL:
         https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L7"""
+
+        # set the environment for the reward function. We're expecting a GymEnv from MJRL, but we only need the gym.Env object that it wraps
         self.env_name = env_name
+
         self.device = device
 
         self.std = std
@@ -66,18 +49,15 @@ class MDP(object):
         self.action_size = 0
         self.state_size = 0
 
-        # for simplicity's sake, we'll just set the absorbing state to be all 0s. I'm not sure if this is how they
-        #   actually did it in the MOReL paper, but it is what I am going with for now.
-        self.absorbing_state = torch.zeros(self.state_size)
-        self.absorbing_state.to(device)
-
         # this is from the WorldModel class. Even though we don't 'technically' learn a rewards network,
         #   if we want ModelBasedNPG to use our USAD-based reward function, we need to set this to true
         self.learn_reward = True
         self.min_reward = np.inf
 
-        # for the time being, just say that every state is known
-        self.usad = lambda s, a: False
+        # for simplicity's sake, we'll just set the absorbing state to be all 0s. I'm not sure if this is how they
+        #   actually did it in the MOReL paper, but it is what I am going with for now.
+        self.absorbing_state = torch.zeros(self.state_size)
+        self.absorbing_state.to(device)
 
         self._init_statistics(dataset)
         self.negative_reward = self.min_reward - negative_reward
@@ -96,6 +76,9 @@ class MDP(object):
         else:
             self.dynamics_model.fit(dataset, num_epochs, batch_size, learning_rate)
 
+    def usad(self, s, a):
+        # for the time being, just say that every state is known
+        return False
 
     def _init_statistics(self, dataset):
         all_actions = []
@@ -157,7 +140,9 @@ class MDP(object):
 
     def reward(self, s, a):
         if self.env_name == 'Ant-v2':
-            r = ant_reward
+            r = reward_functions.ant_reward
+        elif self.env_name == 'Hopper-v2':
+            r = reward_functions.hopper_reward
         else:
             raise NotImplementedError(f'Reward function not implemented for environment: {self.env_name}')
 
@@ -306,6 +291,12 @@ class DynamicsModel(nn.Module):
 
 
 if __name__ == '__main__':
+    # running mdp.py allows us to quickly create and save an MDP model. Parameters are for Ant-v2 env
+    # ant-v2 with the 10k step pure dataset:
+    # python mdp.py --dataset dataset/TRPO_Ant-v2_10000 --output trained_models/MDP_Ant-v2_10000
+    # hopper-v2 with 1 million step pure dataset:
+    # python mdp.py --dataset dataset/TRPO_Hopper-v2_1000000 --output trained_models/MDP_Hopper-v2_1e6 --negative-reward 50
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, required=True)
     parser.add_argument('--dataset', type=str, required=True)
@@ -320,7 +311,7 @@ if __name__ == '__main__':
         dataset = pickle.load(dataset_file)
         print(f'loaded dataset {args.dataset}')
 
-    mdp = MDP(dataset, num_epochs=args.num_epochs, env_name=args.env,
+    mdp = MDP(dataset, env_name=args.env, num_epochs=args.num_epochs,
               device=args.device, negative_reward=args.negative_reward)
     print(mdp.state_mean)
     print(mdp.state_std)
@@ -329,4 +320,3 @@ if __name__ == '__main__':
     print(mdp.state_difference_std)
 
     mdp.save(args.output)
-

@@ -102,7 +102,7 @@ def collect_dataset(env, model, iterations, dataset_dir, action_noise, steps_per
 
 if __name__ == '__main__':
     # example usage: python collect_dataset.py --env Ant-v2 --policy trained_policies/TRPO_Ant-v2_1000.zip --dir ./dataset
-    # python collect_dataset.py --env Hopper-v2 --policy trained_policies/TRPO_Hopper-v2_1000.zip --dir ./dataset --iterations 50000 --trajectory-length 400
+    # python collect_dataset.py --env Hopper-v2 --policy trained_policies/TRPO_Hopper-v2_1000.zip --dir ./dataset --iterations 1000000 --trajectory-length 400
 
     parser = argparse.ArgumentParser(formatter_class=RawTextHelpFormatter)
     parser.add_argument('--env', type=str, required=True, help='<Required> environment to run')
