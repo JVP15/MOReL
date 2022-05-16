@@ -23,6 +23,8 @@ class USAD(object):
         self.action_size = action_size
         self.device = device
 
+        self.batch_size = batch_size
+
         self.dynamics_models = []
 
         if usad_folder is not None:
@@ -39,17 +41,18 @@ class USAD(object):
     def __call__(self, s, a):
         """This is the U_practical(s,a) = {False  if disc(s,a) <= threshold,
                                           {True   if disc(s,a) > threshold
-        function from the MOReL paper"""
+        function from the MOReL paper. It has been modified to work with batches of states and actions"""
 
-        max_disc = self.disc(s,a)
+        discrepancies = self.disc(s,a)
 
-        if max_disc <= self.threshold:
-            return False # The state is known
-        else:
-            return True # the state is unknown
+        # if an element is false, the state is known. If it is true, the state is unknown
+        states_actions_known = discrepancies > self.threshold
+
+        return states_actions_known
 
     def disc(self, s, a):
-        """This is the disc(s, a) = max_ij ||f_i(s,a) - f_j(s,a)|| from the MOReL paper"""
+        """This is the disc(s, a) = max_ij ||f_i(s,a) - f_j(s,a)|| from the MOReL paper.
+        It has been modified to work with batches of states and actions"""
 
         s = torch.tensor(np.array(s), dtype=torch.float32, device=self.device)
         a = torch.tensor(np.array(a), dtype=torch.float32, device=self.device)
@@ -94,7 +97,7 @@ class USAD(object):
         for model_filename in filenames:
             model_path = os.path.join(model_folder, model_filename)
             model = DynamicsModel(dataset, device=self.device)
-            model.load_state_dict(torch.load(model_filename))
+            model.load_state_dict(torch.load(model_path))
             self.dynamics_models.append(model)
 
         self.num_models = len(self.dynamics_models)

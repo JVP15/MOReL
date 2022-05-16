@@ -108,7 +108,8 @@ def run_morel(env_name, dataset, model_path, model_save_path, usad_folder_path, 
     policy = MLP(e.spec, hidden_sizes=npg_kwargs['policy_size'],
                         init_log_std=npg_kwargs['init_log_std'], min_log_std=npg_kwargs['min_log_std'])
 
-    baseline = MLPBaseline(e.spec, reg_coef=1e-3, batch_size=256, epochs=1,  learn_rate=1e-3,
+    batch_size = 256 # this could be a tunable parameter, but it is always 256 in the paper, so we'll keep it fixed
+    baseline = MLPBaseline(e.spec, reg_coef=1e-3, batch_size=batch_size, epochs=1,  learn_rate=1e-3,
                            device=device)
 
     # the agent will use the pessemistic MDP for its learned model
@@ -140,8 +141,14 @@ def run_morel(env_name, dataset, model_path, model_save_path, usad_folder_path, 
     except:
         pass
 
-    loss_general = mdp.compute_loss(s, a, sp)
-    logger.log_kv('MDP Loss', loss_general)
+    total_loss = 0
+    for i in range(0, len(s), batch_size):
+        s_batch = s[i:i + batch_size]
+        a_batch = a[i:i + batch_size]
+        sp_batch = sp[i:i + batch_size]
+        total_loss += mdp.compute_loss(s_batch, a_batch, sp_batch)
+
+    logger.log_kv('MDP Loss', total_loss)
 
     print("Model learning statistics")
     print_data = sorted(filter(lambda v: np.asarray(v[1]).size == 1,

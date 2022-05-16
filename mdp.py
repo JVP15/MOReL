@@ -51,13 +51,13 @@ class MDP(object):
         self.learn_reward = False
         self.min_reward = np.inf
 
-        # for simplicity's sake, we'll just set the absorbing state to be all 0s. I'm not sure if this is how they
-        #   actually did it in the MOReL paper, but it is what I am going with for now.
-        self.absorbing_state = torch.zeros(self.state_size)
-        self.absorbing_state.to(device)
-
         self._init_statistics(dataset)
         self.negative_reward = self.min_reward - negative_reward
+
+        # for simplicity's sake, we'll just set the absorbing state to be all 0s. I'm not sure if this is how they
+        #   actually did it in the MOReL paper, but it is what I am going with for now.
+        self.absorbing_state = torch.zeros(self.state_size, device=self.device)
+
 
         self.dynamics_model = DynamicsModel(dataset, std, device)
         if model_path:
@@ -90,8 +90,36 @@ class MDP(object):
         return self.dynamics_model.device.startswith('cuda')
 
     def forward(self, s, a):
-        # if the USAD returns true, then the state is unknown to our model, so we should return the absorbing state
-        if self.usad(s, a):
+        known_state_action_pairs = self.usad(s, a)
+
+        # I had to create different functions for batches of states and actions in the forward pass
+        if hasattr(known_state_action_pairs, '__len__'):
+            return self._forward_batch(s, a, known_state_action_pairs)
+        else:
+            return self._forward_single(s, a, known_state_action_pairs)
+
+    def _forward_batch(self, s, a, known_state_action_pairs):
+        next_states = torch.zeros((len(s), self.state_size), device=self.device)
+
+        # if the USAD returned true, then the state is unknown to our model, so we should return the absorbing state
+        next_states[known_state_action_pairs] = self.absorbing_state
+
+        # otherwise, just use the dynamics model to predict the next state
+        if sum(known_state_action_pairs == False) > 0:
+            # modified from: https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L47
+            if type(s) == np.ndarray:
+                s = torch.from_numpy(s).float().to(self.device)
+            if type(a) == np.ndarray:
+                a = torch.from_numpy(a).float().to(self.device)
+
+            next_states[~known_state_action_pairs] = self.dynamics_model.predict(s[~known_state_action_pairs],
+                                                                                 a[~known_state_action_pairs])
+
+        return next_states
+
+    def _forward_single(self, s, a, known_state_action_pair):
+        # if the USAD returned true, then the state is unknown to our model, so we should return the absorbing state
+        if known_state_action_pair:
             return self.absorbing_state
         # otherwise, just use the dynamics model to predict the next state
         else:
@@ -161,9 +189,14 @@ class MDP(object):
 if __name__ == '__main__':
     # running mdp.py allows us to quickly create and save an MDP model. Parameters are for Ant-v2 env
     # ant-v2 with the 10k step pure dataset:
-    # python mdp.py --dataset dataset/TRPO_Ant-v2_10000 --env Ant-v2 --output trained_models/MDP_Ant-v2_10000 --usad-output trained_models/USAD_Ant-v2_10000 --epochs 10
+    """python mdp.py --dataset dataset/TRPO_Ant-v2_10000 --env Ant-v2 --output trained_models/MDP_Ant-v2_10000 \
+        --usad-output trained_models/USAD_Ant-v2_10000 --epochs 10
+    """
     # hopper-v2 with 1 million step pure dataset:
-    # python mdp.py --dataset dataset/TRPO_Hopper-v2_1000000 --env Hopper-v2 --output trained_models/MDP_Hopper-v2_1e6 --negative-reward 50
+    """
+    python mdp.py --dataset dataset/TRPO_Hopper-v2_1000000 --env Hopper-v2 --output trained_models/MDP_Hopper-v2_1e6 \
+        --negative-reward 50 --usad-output trained_models/USAD_Hopper-v2_1e6 
+    """
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, required=True)
@@ -184,12 +217,19 @@ if __name__ == '__main__':
               device=args.device, negative_reward=args.negative_reward)
 
     total_loss = 0
+    total_loss_2 = 0
     for trajectory in dataset:
         for s, a, s_next in zip(trajectory['observations'], trajectory['actions'], trajectory['observations'][:1]):
             loss = mdp.compute_loss(s, a, s_next)
             total_loss += loss
 
+        s_batch = np.array(trajectory['observations'][:-1])
+        a_batch = np.array(trajectory['actions'][:-1])
+        s_next_batch = np.array(trajectory['observations'][1:])
+        total_loss_2 += mdp.compute_loss(s_batch, a_batch, s_next_batch)
+
     print('MDP Loss =', total_loss)
+    print('MDP Loss 2 =', total_loss_2)
     print('USAD Threshold =', mdp.usad.threshold)
     mdp.save(args.output)
     mdp.usad.save(args.usad_output)
