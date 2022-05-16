@@ -115,7 +115,7 @@ def run_morel(env_name, dataset, model_path, model_save_path, usad_folder_path, 
     # the agent will use the pessemistic MDP for its learned model
     agent = ModelBasedNPG(learned_model=[mdp], env=e, policy=policy, baseline=baseline,
                           normalized_step_size=npg_kwargs['step_size'], save_logs=True,
-                          reward_function=mdp.compute_path_rewards, termination_function=termination_function,
+                          termination_function=termination_function,
                           device=device, **npg_kwargs['npg_hp'])
 
     # ===============================================================================

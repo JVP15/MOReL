@@ -54,8 +54,11 @@ class USAD(object):
         """This is the disc(s, a) = max_ij ||f_i(s,a) - f_j(s,a)|| from the MOReL paper.
         It has been modified to work with batches of states and actions"""
 
-        s = torch.tensor(np.array(s), dtype=torch.float32, device=self.device)
-        a = torch.tensor(np.array(a), dtype=torch.float32, device=self.device)
+        # if s and a are not already tensors, convert them to tensors
+        if not isinstance(s, torch.Tensor):
+            s = torch.tensor(np.array(s), dtype=torch.float32, device=self.device)
+        if not isinstance(a, torch.Tensor):
+            a = torch.tensor(np.array(a), dtype=torch.float32, device=self.device)
 
         diffs = []
         for i, model_i in enumerate(self.dynamics_models):

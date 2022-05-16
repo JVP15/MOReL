@@ -46,9 +46,9 @@ class MDP(object):
         self.action_size = 0
         self.state_size = 0
 
-        # this is from the WorldModel class. It tells the planning algorithm whether the MDP uses a learned
-        #  rewards function or if it uses the true reward function from the environment
-        self.learn_reward = False
+        # this is from the WorldModel class. It tells the planning algorithm whether the to use the MDP's reward
+        #  function or a different one
+        self.learn_reward = True
         self.min_reward = np.inf
 
         self._init_statistics(dataset)
@@ -57,7 +57,6 @@ class MDP(object):
         # for simplicity's sake, we'll just set the absorbing state to be all 0s. I'm not sure if this is how they
         #   actually did it in the MOReL paper, but it is what I am going with for now.
         self.absorbing_state = torch.zeros(self.state_size, device=self.device)
-
 
         self.dynamics_model = DynamicsModel(dataset, std, device)
         if model_path:
@@ -176,6 +175,10 @@ class MDP(object):
         # taken from https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L79
         # Intended for logging use only, not for loss computation
 
+        s = torch.from_numpy(s).float().to(self.device)
+        a = torch.from_numpy(a).float().to(self.device)
+        #s_next = torch.from_numpy(s_next).float().to(self.device)
+
         sp = self.forward(s, a)
         s_next = torch.from_numpy(s_next).float() if type(s_next) == np.ndarray else s_next
         s_next = s_next.to(self.device)
@@ -223,13 +226,13 @@ if __name__ == '__main__':
             loss = mdp.compute_loss(s, a, s_next)
             total_loss += loss
 
-        s_batch = np.array(trajectory['observations'][:-1])
-        a_batch = np.array(trajectory['actions'][:-1])
-        s_next_batch = np.array(trajectory['observations'][1:])
-        total_loss_2 += mdp.compute_loss(s_batch, a_batch, s_next_batch)
+        # s_batch = np.array(trajectory['observations'][:-1])
+        # a_batch = np.array(trajectory['actions'][:-1])
+        # s_next_batch = np.array(trajectory['observations'][1:])
+        # total_loss_2 += mdp.compute_loss(s_batch, a_batch, s_next_batch)
 
     print('MDP Loss =', total_loss)
-    print('MDP Loss 2 =', total_loss_2)
+    #print('MDP Loss 2 =', total_loss_2)
     print('USAD Threshold =', mdp.usad.threshold)
     mdp.save(args.output)
     mdp.usad.save(args.usad_output)
