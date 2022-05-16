@@ -7,14 +7,15 @@ def ant_reward(s,a):
     # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py
     # for information about what each value in the state represents
     # this isn't the exact same reward function as the one used by Ant-v2, but it is pretty accurate
+    # expects s and a to be a batche of states and actions
 
     healthy_reward = 1.0
-    x_velocity = s[:, :, 13] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L69
+    x_velocity = s[:, 13] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L69
     forward_reward = x_velocity
 
     rewards = healthy_reward + forward_reward
 
-    contact_force = s[:, :, 27:] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L85
+    contact_force = s[:, 27:] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L85
     contact_cost_weight = .5 * 1e-3
     contact_cost = contact_cost_weight * np.sum(np.square(np.clip(contact_force, -1, 1)), axis=-1)
     control_cost_weight = .5
@@ -22,9 +23,9 @@ def ant_reward(s,a):
 
     costs = contact_cost + control_cost
     # this reward function is typically off by about .0045, so we can make the reward function more accurate by subtracting this amount
-    final_rewards = rewards - costs - .0045
+    total_rewards = rewards - costs - .0045
 
-    return final_rewards
+    return total_rewards
 
 def ant_termination_function(trajectories):
     # this function truncates a trajectory if the ant reaches a termination state before the trajectory is done
@@ -61,13 +62,14 @@ hopper_obs_mask = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 0.02, 0.02, 0.02, 0.02, 0.0
 def hopper_reward(s, a):
     # mimics reward function for the hopper-v2 environment from:
     # https://github.com/aravindr93/mjrl/blob/v2/projects/model_based_npg/utils/reward_functions/gym_hopper.py
+    # expects s and a to be a batche of states and actions
 
     obs = np.clip(s, -10.0, 10.0)
     act = np.clip(a, -1.0, 1.0)
-    vel_x = obs[:, :, -6] / 0.02
+    vel_x = obs[:, -6] / 0.02
     power = np.sum(np.square(act), axis=-1)
-    height = obs[:, :, 0]
-    ang = obs[:, :,1]
+    height = obs[:, 0]
+    ang = obs[:,1]
     alive_bonus = 1.0 * (height > 0.7) * (np.abs(ang) <= 0.2)
     rewards = vel_x + alive_bonus - 1e-3 * power
     return rewards

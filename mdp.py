@@ -111,7 +111,7 @@ class MDP(object):
         next_states[known_state_action_pairs] = self.absorbing_state
 
         # otherwise, just use the dynamics model to predict the next state
-        if sum(known_state_action_pairs == False) > 0:
+        if np.sum(known_state_action_pairs == False) > 0:
             # modified from: https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L47
             if type(s) == np.ndarray:
                 s = torch.from_numpy(s).float().to(self.device)
@@ -151,6 +151,8 @@ class MDP(object):
             return s_next
 
     def reward(self, s, a):
+        # this function only works when s and a are a batch of values
+        # e.g., from s = trajectory['observation'], a = trajectory['action']
         if self.env_name == 'Ant-v2':
             r = reward_functions.ant_reward
         elif self.env_name == 'Hopper-v2':
@@ -158,27 +160,49 @@ class MDP(object):
         else:
             raise NotImplementedError(f'Reward function not implemented for environment: {self.env_name}')
 
-        # if np.array_equal(s, self.absorbing_state) #or self.usad(s, a):
-        #     return self.negative_reward
-        # else:
-        #     return r(s, a)
+        if not isinstance(s, np.ndarray):
+            s = np.array(s)
+        if not isinstance(a, np.ndarray):
+            a = np.array(a)
 
-        return r(s, a)
+        rewards = np.zeros(len(s))
+        known_state_action_pairs = self.usad(s, a)
+
+        # if any state matches the absorbing state, then we should return the negative reward
+        # we can use all(axis=-1) to make sure that each state is being compared against the absorbing state
+        # same thing if any of the state-action pairs are unknown (the USAD returned true),
+        #   then we should return the negative reward
+        negative_reward_locations = np.logical_or(known_state_action_pairs,
+                                                  (s == self.absorbing_state.to('cpu').data.numpy()).all(axis=-1) )
+
+        rewards[negative_reward_locations] = self.min_reward
+
+        # otherwise, we can just use the reward function to get the reward for each state-action pair
+        # note: the reward function expects s and a to be nonempty, so we need to make sure that there are some states
+        #  and actions that are both known and not the absorbing state
+        if np.sum(negative_reward_locations) >= 0:
+            rewards[~negative_reward_locations] = r(s[~negative_reward_locations],
+                                                   a[~negative_reward_locations])
+
+        return rewards
 
     def compute_path_rewards(self, paths):
         # from https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L150
         # paths has two keys: observations and actions
         # paths["observations"] : (num_traj, horizon, obs_dim)
         # paths["rewards"] should have shape (num_traj, horizon)
-        s, a = paths['observations'], paths['actions']
-        num_traj, horizon, _ = s.shape
 
-        # rewards = np.zeros((num_traj, horizon))
+        num_traj, horizon, _ = paths["observations"].shape
+        rewards = np.zeros((num_traj, horizon))
         # for i in range(num_traj):
         #     for j in range(horizon):
         #         rewards[i, j] = self.reward(s[i, j], a[i, j])
-        rewards = self.reward(s, a)
+        for num_traj, (state_batch, action_batch) in enumerate(zip(paths['observations'], paths['actions'])):
+            rewards[num_traj] = self.reward(state_batch, action_batch)
+
         paths['rewards'] = rewards if rewards.shape[0] > 1 else rewards.ravel()
+
+        return rewards
 
     def compute_loss(self, s, a, s_next):
         # taken from https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L79
@@ -243,5 +267,8 @@ if __name__ == '__main__':
     print('MDP Loss =', total_loss)
     #print('MDP Loss 2 =', total_loss_2)
     print('USAD Threshold =', mdp.usad.threshold)
+
     mdp.save(args.output)
     mdp.usad.save(args.usad_output)
+
+
