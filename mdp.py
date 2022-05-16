@@ -89,13 +89,20 @@ class MDP(object):
         return self.dynamics_model.device.startswith('cuda')
 
     def forward(self, s, a):
-        known_state_action_pairs = self.usad(s, a)
+        #known_state_action_pairs = self.usad(s, a)
 
         # I had to create different functions for batches of states and actions in the forward pass
-        if hasattr(known_state_action_pairs, '__len__'):
-            return self._forward_batch(s, a, known_state_action_pairs)
-        else:
-            return self._forward_single(s, a, known_state_action_pairs)
+        # if hasattr(known_state_action_pairs, '__len__'):
+        #     return self._forward_batch(s, a, known_state_action_pairs)
+        # else:
+        #     return self._forward_single(s, a, known_state_action_pairs)
+
+        if type(s) == np.ndarray:
+            s = torch.from_numpy(s).float().to(self.device)
+        if type(a) == np.ndarray:
+            a = torch.from_numpy(a).float().to(self.device)
+
+        return self.dynamics_model.predict(s, a)
 
     def _forward_batch(self, s, a, known_state_action_pairs):
         next_states = torch.zeros((len(s), self.state_size), device=self.device)
@@ -151,10 +158,12 @@ class MDP(object):
         else:
             raise NotImplementedError(f'Reward function not implemented for environment: {self.env_name}')
 
-        if np.array_equal(s, self.absorbing_state) or self.usad(s, a):
-            return self.negative_reward
-        else:
-            return r(s, a)
+        # if np.array_equal(s, self.absorbing_state) #or self.usad(s, a):
+        #     return self.negative_reward
+        # else:
+        #     return r(s, a)
+
+        return r(s, a)
 
     def compute_path_rewards(self, paths):
         # from https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L150
@@ -164,12 +173,12 @@ class MDP(object):
         s, a = paths['observations'], paths['actions']
         num_traj, horizon, _ = s.shape
 
-        rewards = np.zeros((num_traj, horizon))
-        for i in range(num_traj):
-            for j in range(horizon):
-                rewards[i, j] = self.reward(s[i, j], a[i, j])
-
-        paths['rewards'] = rewards
+        # rewards = np.zeros((num_traj, horizon))
+        # for i in range(num_traj):
+        #     for j in range(horizon):
+        #         rewards[i, j] = self.reward(s[i, j], a[i, j])
+        rewards = self.reward(s, a)
+        paths['rewards'] = rewards if rewards.shape[0] > 1 else rewards.ravel()
 
     def compute_loss(self, s, a, s_next):
         # taken from https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L79

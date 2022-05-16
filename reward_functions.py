@@ -9,22 +9,22 @@ def ant_reward(s,a):
     # this isn't the exact same reward function as the one used by Ant-v2, but it is pretty accurate
 
     healthy_reward = 1.0
-    x_velocity = s[13] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L69
+    x_velocity = s[:, :, 13] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L69
     forward_reward = x_velocity
 
     rewards = healthy_reward + forward_reward
 
-    contact_force = s[27:] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L85
+    contact_force = s[:, :, 27:] # https://github.com/openai/gym/blob/master/gym/envs/mujoco/ant_v3.py#L85
     contact_cost_weight = .5 * 1e-3
-    contact_cost = contact_cost_weight * np.sum(np.square(np.clip(contact_force, -1, 1)))
+    contact_cost = contact_cost_weight * np.sum(np.square(np.clip(contact_force, -1, 1)), axis=-1)
     control_cost_weight = .5
-    control_cost = control_cost_weight * np.sum(np.square(a))
+    control_cost = control_cost_weight * np.sum(np.square(a), axis=-1)
 
     costs = contact_cost + control_cost
     # this reward function is typically off by about .0045, so we can make the reward function more accurate by subtracting this amount
-    reward = rewards - costs - .0045
+    final_rewards = rewards - costs - .0045
 
-    return reward
+    return final_rewards
 
 def ant_termination_function(trajectories):
     # this function truncates a trajectory if the ant reaches a termination state before the trajectory is done
@@ -64,13 +64,13 @@ def hopper_reward(s, a):
 
     obs = np.clip(s, -10.0, 10.0)
     act = np.clip(a, -1.0, 1.0)
-    vel_x = obs[-6] / 0.02
-    power = np.sum(np.square(act))
-    height = obs[0]
-    ang = obs[1]
+    vel_x = obs[:, :, -6] / 0.02
+    power = np.sum(np.square(act), axis=-1)
+    height = obs[:, :, 0]
+    ang = obs[:, :,1]
     alive_bonus = 1.0 * (height > 0.7) * (np.abs(ang) <= 0.2)
-    reward = vel_x + alive_bonus - 1e-3 * power
-    return reward
+    rewards = vel_x + alive_bonus - 1e-3 * power
+    return rewards
 
 def hopper_termination_function(paths):
     # taken from
