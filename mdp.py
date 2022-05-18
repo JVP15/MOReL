@@ -89,20 +89,13 @@ class MDP(object):
         return self.dynamics_model.device.startswith('cuda')
 
     def forward(self, s, a):
-        #known_state_action_pairs = self.usad(s, a)
+        known_state_action_pairs = self.usad(s, a)
 
         # I had to create different functions for batches of states and actions in the forward pass
-        # if hasattr(known_state_action_pairs, '__len__'):
-        #     return self._forward_batch(s, a, known_state_action_pairs)
-        # else:
-        #     return self._forward_single(s, a, known_state_action_pairs)
-
-        if type(s) == np.ndarray:
-            s = torch.from_numpy(s).float().to(self.device)
-        if type(a) == np.ndarray:
-            a = torch.from_numpy(a).float().to(self.device)
-
-        return self.dynamics_model.predict(s, a)
+        if hasattr(known_state_action_pairs, '__len__'):
+            return self._forward_batch(s, a, known_state_action_pairs)
+        else:
+            return self._forward_single(s, a, known_state_action_pairs)
 
     def _forward_batch(self, s, a, known_state_action_pairs):
         next_states = torch.zeros((len(s), self.state_size), device=self.device)
