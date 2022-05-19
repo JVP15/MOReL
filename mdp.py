@@ -89,6 +89,9 @@ class MDP(object):
         return self.dynamics_model.device.startswith('cuda')
 
     def forward(self, s, a):
+        """This function represent's the MDP's ability to predict the next state given a state and action.
+        Due to the planning algorithm's implementation, we needed to create a seperate predict and forward function."""
+        
         known_state_action_pairs = self.usad(s, a)
 
         # I had to create different functions for batches of states and actions in the forward pass
@@ -100,10 +103,11 @@ class MDP(object):
     def _forward_batch(self, s, a, known_state_action_pairs):
         next_states = torch.zeros((len(s), self.state_size), device=self.device)
 
-        # if the USAD returned true, then the state is unknown to our model, so we should return the absorbing state
+        # if the state-action pair is unknown (the USAD returns true), then we should assign the next state to be the absorbing state
         next_states[known_state_action_pairs] = self.absorbing_state
 
-        # otherwise, just use the dynamics model to predict the next state
+        # otherwise, we use the dynamics model to predict the next state. Note that dynamic_model.predict() expects a batch of
+        #   states and actions, so we have to make sure that there are some known state-action pairs
         if np.sum(known_state_action_pairs == False) > 0:
             # modified from: https://github.com/aravindr93/mjrl/blob/15bf3c0ed0c97fef761a8924d1b22413beb79900/mjrl/algos/mbrl/nn_dynamics.py#L47
             if type(s) == np.ndarray:
@@ -131,6 +135,9 @@ class MDP(object):
             return self.dynamics_model.predict(s, a)
 
     def predict(self, s, a):
+        """This function represent's the MDP's ability to predict the next state given a state and action.
+        Due to the planning algorithm's implementation, we needed to create a seperate predict and forward function."""
+
         # if the USAD returns true, then the state is unknown to our model, so we should return the absorbing state
         if self.usad(s, a):
             return self.absorbing_state.to('cpu').data.numpy()
@@ -161,16 +168,17 @@ class MDP(object):
         rewards = np.zeros(len(s))
         known_state_action_pairs = self.usad(s, a)
 
-        # if any state matches the absorbing state, then we should return the negative reward
-        # we can use all(axis=-1) to make sure that each state is being compared against the absorbing state
-        # same thing if any of the state-action pairs are unknown (the USAD returned true),
-        #   then we should return the negative reward
+        # if any state matches the absorbing state, then we assign it a negative reward
+        # since s is a list/batch of states, we compare each state in that batch to the absoring state using np.all(axis-1)
+        # we also check if the state-action pair is known to the USAD, and if it isn't, then we assign it a
+        #  negative reward
         negative_reward_locations = np.logical_or(known_state_action_pairs,
                                                   (s == self.absorbing_state.to('cpu').data.numpy()).all(axis=-1) )
 
         rewards[negative_reward_locations] = self.min_reward
 
-        # otherwise, we can just use the reward function to get the reward for each state-action pair
+        # for the states that are known to the USAD and are not an absorbing state, we just use the reward function
+        #  for the environment
         # note: the reward function expects s and a to be nonempty, so we need to make sure that there are some states
         #  and actions that are both known and not the absorbing state
         if np.sum(negative_reward_locations) >= 0:
@@ -187,9 +195,7 @@ class MDP(object):
 
         num_traj, horizon, _ = paths["observations"].shape
         rewards = np.zeros((num_traj, horizon))
-        # for i in range(num_traj):
-        #     for j in range(horizon):
-        #         rewards[i, j] = self.reward(s[i, j], a[i, j])
+
         for num_traj, (state_batch, action_batch) in enumerate(zip(paths['observations'], paths['actions'])):
             rewards[num_traj] = self.reward(state_batch, action_batch)
 
@@ -203,7 +209,6 @@ class MDP(object):
 
         s = torch.from_numpy(s).float().to(self.device)
         a = torch.from_numpy(a).float().to(self.device)
-        #s_next = torch.from_numpy(s_next).float().to(self.device)
 
         sp = self.forward(s, a)
         s_next = torch.from_numpy(s_next).float() if type(s_next) == np.ndarray else s_next
@@ -248,17 +253,24 @@ if __name__ == '__main__':
     total_loss = 0
     total_loss_2 = 0
     for trajectory in dataset:
+        s_batch = []
+        a_batch = []
+        s_next_batch = []
+
         for s, a, s_next in zip(trajectory['observations'], trajectory['actions'], trajectory['observations'][:1]):
             loss = mdp.compute_loss(s, a, s_next)
             total_loss += loss
+            s_batch.append(s)
+            a_batch.append(a)
+            s_next_batch.append(s_next)
 
-        # s_batch = np.array(trajectory['observations'][:-1])
-        # a_batch = np.array(trajectory['actions'][:-1])
-        # s_next_batch = np.array(trajectory['observations'][1:])
-        # total_loss_2 += mdp.compute_loss(s_batch, a_batch, s_next_batch)
+        s_batch = np.array(s_batch)
+        a_batch = np.array(a_batch)
+        s_next_batch = np.array(s_next_batch)
+        total_loss_2 += mdp.compute_loss(s_batch, a_batch, s_next_batch)
 
     print('MDP Loss =', total_loss)
-    #print('MDP Loss 2 =', total_loss_2)
+    print('MDP Loss Batch =', total_loss_2)
     print('USAD Threshold =', mdp.usad.threshold)
 
     mdp.save(args.output)
