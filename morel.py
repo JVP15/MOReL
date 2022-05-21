@@ -12,7 +12,6 @@ import os
 import json
 import mjrl.samplers.core as sampler
 import mjrl.utils.tensor_utils as tensor_utils
-from tqdm import tqdm
 
 import reward_functions
 from mjrl.policies.gaussian_mlp import MLP
@@ -251,7 +250,7 @@ if __name__ == '__main__':
     # to recreate the paper's Hopper-v2 use:
     """
     python morel.py --env Hopper-v2 --dataset dataset/TRPO_Hopper-v2_1000000 --model trained_models/MDP_Hopper-v2_1e6 \
-        --usad-model trained_models/USAD_Hopper-v2_1e6 --output-dir hopper_output_naive --horizon 400 \
+        --usad-model trained_models/USAD_Hopper-v2_1e6 --output-dir hopper_output --horizon 400 \
         --negative-reward 50 --num-npg-updates 500 --init-log-std -.25 --num-gradient-trajectories 50 --cg-steps 25
     """
 

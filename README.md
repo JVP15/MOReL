@@ -1,32 +1,60 @@
 # MOReL
-This is an implementation of the MOReL offline reinforcement learning algorithm using Python and Tensorflow. The full paper can be found here: [https://arxiv.org/pdf/2005.05951.pdf](https://arxiv.org/pdf/2005.05951.pdf)
+This is an implementation of the MOReL offline reinforcement learning algorithm using Python. The full paper can be found here: [https://arxiv.org/pdf/2005.05951.pdf](https://arxiv.org/pdf/2005.05951.pdf)
 
-# To-Do List
+## Installation
 
-## :heavy_check_mark: Dynamic Model Learning 
-MOReL uses a Gaussian dynamics `P(*|s,a) = N(f(s,a), Σ)`. 
+This project relies on the [MJRL](https://github.com/aravindr93/mjrl/tree/v2) repo. Clone that repository into this folder using:
 
-* :construction: Train the neural network used by `f(s,a)` on the dataset using maximum likelihood estimation. The model for the Ant-v2 Pure dataset has been trained and uploaded. 
-* :heavy_check_mark: Implement `f(s,a)` (see the bottom of [page 6](https://arxiv.org/pdf/2005.05951.pdf#page=6))
+`git clone https://github.com/aravindr93/mjrl.git`
 
-## :x: USAD
-MOReL uses an Unknown State-Action Detector (USAD) to identify what states are known and unknown. This is implemented by creating an ensemble of models trained using different minibatches of the dataset. 
+then navigate into the MJRL repo with `cd mjrl` and checkout the branch `v2` (which this project relies on) using `git checkout v2`. You will then need to follow [these steps](https://github.com/aravindr93/mjrl/tree/master/setup#installation) to properly install MJRL. 
 
-* :x: Implement `disc(s,a)` (see top of [page 7](https://arxiv.org/pdf/2005.05951.pdf#page=7))
-* :x: Implement USAD (for threshold, see section C.5 on [page 21](https://arxiv.org/pdf/2005.05951.pdf#page=21))
-* :x: Train the USAD dynamics models. 
+This implementation also relies on [Stable Baselines3](https://stable-baselines3.readthedocs.io/en/master/index.html) and [Stable Baselines3-Contrib](https://stable-baselines3.readthedocs.io/en/master/guide/sb3_contrib.html), which you can install with:
 
-## :heavy_check_mark: Dataset
+`pip install stable-baselines3[extra]`
+`pip install sb3-contrib`
 
-The MOReL algorithm was trained and tested using 4 environments: HalfCheetah-v2, Hopper-v2, Walker2D-v2, and ~~Headcrab~~ Ant-v2. 5 datasets were generated for each environment (see section 5 on [page 7](https://arxiv.org/pdf/2005.05951.pdf#page=7) for a breakdown of how they were created). Each dataset contains 1,000,000 timesteps. The paper used a partially trained policy π to generate the dataset.
+## Training Collection Policies
 
-* :heavy_check_mark: Implement the policy training algorithm (doesn't work for HalfCheetah-v2)
-* :heavy_check_mark: Train the collection policy (see see section 5 on [page 7](https://arxiv.org/pdf/2005.05951.pdf#page=7) for a breakdown on how the policy was trained). Collection policies trained for Hopper-v2, Walker2d-v2, and Ant-v2 using the TRPO implementation in Stable Baselines3 Contrib. Saved policies are stored in 'trained_policies' 
-* :construction: Create the datasets. Currently only have Ant-v2 Pure dataset
+We have pre-trained collection policies (TRPO trained until it reached a score of 1000) for Ant-v2, Hopper-v2, and Walker2d-v2, which can be found in the `pretrained_policies` folder. To train your own collection policy, you can use `train_collection_policy.py`. Run `train_collection_policy.py --help` to see all available options. Here is the command we used to train the Hopper-v2 policy:
 
-## :construction: Planning
+`python train_collection_policy.py --env Hopper-v2 --target-reward 1000 --policy-dir trained_policies
 
-The policy used in the MOReL paper plans using the dynamics model and the USAD. It is trained using a model-based NPG algorithm from [https://sites.google.com/view/mbrl-game](https://sites.google.com/view/mbrl-game).
+## Collecting Datasets
 
-* :construction: Implement the policy training algorithm 
-* :x: Train the policy 
+Datasets take up a lot of space, and so we only have a dataset that contains 10,000 timesteps from Ant-v2 collected using the pure collection policy. You can create your own datasets using `collect_dataset.py`. Run `collect_dataset.py --help` to see all available options. Here is how we collected the Ant-v2 dataset:
+
+`python collect_dataset.py --env Ant-v2 --policy trained_policies/TRPO_Ant-v2_1000.zip --dir ./dataset`
+
+To collect the same dataset with gaussian noise with a std of 0.1, run:
+
+`python collect_dataset.py --env Ant-v2 --policy trained_policies/TRPO_Ant-v2_1000.zip --dir ./dataset --action-noise gauss 0.1`
+
+To collect the same dataset with partially random actions instead of noise, run:
+
+`python collect_dataset.py --env Ant-v2 --policy trained_policies/TRPO_Ant-v2_1000.zip --dir ./dataset --action-noise random 0.1`
+
+Here is how to collect 1,000,000 timesteps for the Hopper-v2 environment using the pure collection policy. Note the trajectory length has been reduced to 400 to follow the dataset collection methods performed in the paper:
+
+`python collect_dataset.py --env Hopper-v2 --policy trained_policies/TRPO_Hopper-v2_1000.zip --dir ./dataset --iterations 1000000 --trajectory-length 400` 
+
+## Training Models
+
+Training dynamics models on datasets with 1,000,000 timesteps takes hours. So we have provided a pretrained MDP dynamics model and USAD dynamics models (trained on 1,000,000 pure policy Hopper-v2 dataset) in `trained_models`. To train your own models, use `mdp.py`. Here is an example to train an MDP and the USAD on the Ant-v2 dataset:
+
+`python mdp.py --dataset dataset/TRPO_Ant-v2_10000 --env Ant-v2 --output trained_models/MDP_Ant-v2_10000 --usad-output trained_models/USAD_Ant-v2_10000 --epochs 10`
+
+Here is the command to train an MDP and USAD on the 1,000,000 step pure policy Hopper-v2 dataset (to replicate the results from the paper):
+
+`python mdp.py --dataset dataset/TRPO_Hopper-v2_1000000 --env Hopper-v2 --output trained_models/MDP_Hopper-v2_1e6 --negative-reward 50 --usad-output trained_models/USAD_Hopper-v2_1e6`
+
+## Running MOReL 
+
+Once you have a dataset and (optionally) a pretrained MDP and USAD, you can run the MOReL algorithm using `morel.py`. Run `morel.py` to see all of the options and hyperparameters available for tuning. To run MOReL on Ant-v2 using the dataset with 10,000 timesteps and the hyperparameters for Ant-v2 from the paper, run:
+
+`python morel.py --env Ant-v2 --dataset dataset/TRPO_Ant-v2_10000 --output-dir ant_output --model trained_models/MDP_Ant-v2_10000 --usad-model trained_models/USAD_Ant-v2_10000`
+
+To recreate the results from the paper for Hopper-v2 trained on the pure policy dataset of 1,000,000 timesteps, run: 
+
+`python morel.py --env Hopper-v2 --dataset dataset/TRPO_Hopper-v2_1000000 --model trained_models/MDP_Hopper-v2_1e6 --usad-model trained_models/USAD_Hopper-v2_1e6 --output-dir hopper_output_naive --horizon 400 --negative-reward 50 --num-npg-updates 500 --init-log-std -.25 --num-gradient-trajectories 50 --cg-steps 25`
+
